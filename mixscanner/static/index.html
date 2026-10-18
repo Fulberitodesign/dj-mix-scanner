@@ -63,6 +63,9 @@
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
   a.btn { display: inline-block; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line);
     color: var(--text); text-decoration: none; font-size: 14px; }
+  #playlist ol.steps { list-style: decimal; margin: 4px 0 8px; padding-left: 20px; color: var(--muted); }
+  #playlist ol.steps li { margin: 2px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
   a.btn.spotify { background: #1db954; border-color: #1db954; color: #000; font-weight: 600; }
   @media (max-width: 560px) { li.track { grid-template-columns: 56px 1fr; } .cover { display: none; } }
 </style>
@@ -104,12 +107,28 @@
 
   <section id="playlist" hidden>
     <h2>🎵 Créer une playlist Spotify</h2>
-    <p><strong>Sans Spotify Premium :</strong> copiez la liste, ouvrez Spotlistr (gratuit), collez-la, connectez-vous à Spotify et créez la playlist.</p>
+    <p><strong>Méthode recommandée — avec l'app Spotify (gratuit, sans Premium) :</strong></p>
+    <ol class="steps">
+      <li>Cliquez sur « Préparer les liens Spotify » (environ 6 s par morceau, laissez la page ouverte).</li>
+      <li>Cliquez sur « Copier les liens Spotify ».</li>
+      <li>Dans l'app Spotify : <em>+ Créer → Playlist</em>, cliquez dans la playlist vide puis faites <strong>Cmd + V</strong>.</li>
+    </ol>
+    <div class="row">
+      <button class="primary" id="sl-go" type="button">🔗 Préparer les liens Spotify</button>
+      <span id="sl-status" class="muted"></span>
+    </div>
+    <div id="sl-result" hidden>
+      <textarea id="sl-text" readonly></textarea>
+      <div class="row"><button class="primary" id="sl-copy" type="button">📋 Copier les liens Spotify</button></div>
+      <p id="sl-missing"></p>
+    </div>
+
+    <p style="margin-top:20px"><strong>Autre méthode :</strong> copiez la liste « Artiste - Titre » et collez-la dans TuneMyMusic ou Spotlistr.</p>
     <textarea id="pl-text" readonly></textarea>
     <div class="row">
-      <button class="primary" id="pl-copy" type="button">📋 Copier la liste</button>
-      <a class="btn spotify" href="https://www.spotlistr.com/search/textbox" target="_blank" rel="noopener">Ouvrir Spotlistr</a>
-      <a class="btn" href="https://www.tunemymusic.com/fr/transfer" target="_blank" rel="noopener">ou TuneMyMusic</a>
+      <button id="pl-copy" type="button">📋 Copier la liste</button>
+      <a class="btn" href="https://www.tunemymusic.com/fr/transfer" target="_blank" rel="noopener">TuneMyMusic</a>
+      <a class="btn" href="https://www.spotlistr.com/search/textbox" target="_blank" rel="noopener">Spotlistr</a>
       <a class="btn" id="pl-dl">Télécharger (.txt)</a>
     </div>
     <div id="pl-direct" hidden>
@@ -135,7 +154,8 @@ let timer = null;
 $("f").addEventListener("submit", async (e) => {
   e.preventDefault();
   clearTimeout(timer);
-  $("list").innerHTML = ""; $("head").hidden = true; $("playlist").hidden = true; $("exports").hidden = true; $("legend").hidden = true;
+  $("list").innerHTML = ""; $("head").hidden = true; $("playlist").hidden = true; $("sl-result").hidden = true;
+  $("sl-status").textContent = ""; clearTimeout(slTimer); $("exports").hidden = true; $("legend").hidden = true;
   $("go").disabled = true;
   $("warn").textContent = "";
   $("status").textContent = "Démarrage…";
@@ -148,7 +168,32 @@ $("f").addEventListener("submit", async (e) => {
   } catch (err) { fail(err.message); }
 });
 
+let slTimer = null;
+async function pollSpotifyLinks(id) {
+  const st = (await (await fetch(`/api/jobs/${id}`)).json()).spotify_links || {};
+  if (st.status === "running") {
+    $("sl-status").textContent = st.total ? `Recherche… ${st.done}/${st.total} morceaux` : "Recherche…";
+    slTimer = setTimeout(() => pollSpotifyLinks(id), 2000);
+    return;
+  }
+  $("sl-go").disabled = false;
+  if (st.status === "error") { $("sl-status").textContent = "Erreur : " + st.error; return; }
+  if (st.status !== "done") return;
+  $("sl-status").textContent = `${st.links.length ? "✅" : "⚠️"} ${st.links.length} liens Spotify trouvés`;
+  $("sl-text").value = st.links.join("\n");
+  $("sl-missing").textContent = st.missing.length
+    ? `Introuvables sur Spotify (${st.missing.length}) : ${st.missing.join(" · ")}` : "";
+  $("sl-result").hidden = false;
+}
+
 async function showPlaylist(id) {
+  $("sl-go").onclick = async () => {
+    $("sl-go").disabled = true;
+    $("sl-status").textContent = "Démarrage…";
+    await fetch(`/api/jobs/${id}/spotify-links`, { method: "POST" });
+    clearTimeout(slTimer);
+    pollSpotifyLinks(id);
+  };
   const text = await (await fetch(`/api/jobs/${id}/export.playlist`)).text();
   const n = text.trim() ? text.trim().split("\n").length : 0;
   if (!n) return;
@@ -160,12 +205,15 @@ async function showPlaylist(id) {
   $("playlist").hidden = false;
 }
 
-$("pl-copy").addEventListener("click", async () => {
-  const ta = $("pl-text");
+async function copyFrom(textareaId, button, doneText) {
+  const ta = $(textareaId);
   try { await navigator.clipboard.writeText(ta.value); }
   catch (e) { ta.focus(); ta.select(); document.execCommand("copy"); }
-  $("pl-copy").textContent = "✅ Copié ! Collez-le dans Spotlistr";
-});
+  button.textContent = doneText;
+}
+$("pl-copy").addEventListener("click", (e) => copyFrom("pl-text", e.currentTarget, "✅ Copié !"));
+$("sl-copy").addEventListener("click", (e) =>
+  copyFrom("sl-text", e.currentTarget, "✅ Copié ! Collez-les (Cmd + V) dans une playlist de l'app Spotify"));
 
 function fail(msg) { $("status").innerHTML = `<span class="err">Erreur : ${esc(msg)}</span>`; $("go").disabled = false; }
 

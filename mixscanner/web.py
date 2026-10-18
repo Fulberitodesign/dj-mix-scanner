@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 
-from . import spotify_playlist
+from . import odesli, spotify_playlist
 from .export import EXPORTERS
 from .pipeline import ScanOptions, ScanResult, scan
 from .tracklist import build_tracklist
@@ -45,6 +45,7 @@ class Job:
         self.warning_count = 0
         self.error: str | None = None
         self.result: ScanResult | None = None
+        self.spotify_links: dict[str, Any] = {"status": "idle"}
         self.lock = threading.Lock()
 
     def on_event(self, stage: str, data: dict[str, Any]) -> None:
@@ -84,9 +85,27 @@ class Job:
             self.error = str(e)
             self.status = "error"
 
+    def resolve_spotify_links(self) -> None:
+        """Cherche le lien Spotify de chaque morceau (via song.link), en arrière-plan."""
+        def progress(done: int, total: int) -> None:
+            self.spotify_links.update(done=done, total=total)
+
+        async def run() -> tuple[list[str], list]:
+            async with httpx.AsyncClient(timeout=20) as client:
+                return await odesli.resolve_spotify_links(self.result.tracks, client, progress)
+
+        self.spotify_links = {"status": "running", "done": 0, "total": 0}
+        try:
+            links, missing = asyncio.run(run())
+            self.spotify_links = {"status": "done", "links": links,
+                                  "missing": [f"{t.artist} - {t.title}" for t in missing]}
+        except Exception as e:
+            self.spotify_links = {"status": "error", "error": f"{type(e).__name__}: {e}"}
+
     def to_dict(self) -> dict[str, Any]:
         with self.lock:
             return {
+                "spotify_links": self.spotify_links,
                 "id": self.id, "status": self.status, "stage": self.stage, "progress": self.progress,
                 "source": self.source, "error": self.error, "warnings": self.warnings, "warning_count": self.warning_count,
                 "windows_done": len(self.hits), "tracks": [t.to_dict() for t in self.tracks],
@@ -116,6 +135,16 @@ def get_job(job_id: str) -> dict[str, Any]:
     if job_id not in JOBS:
         raise HTTPException(404, "Analyse introuvable")
     return JOBS[job_id].to_dict()
+
+
+@app.post("/api/jobs/{job_id}/spotify-links")
+def start_spotify_links(job_id: str) -> dict[str, str]:
+    job = JOBS.get(job_id)
+    if not job or not job.result:
+        raise HTTPException(404, "Analyse non terminée")
+    if job.spotify_links.get("status") != "running":
+        threading.Thread(target=job.resolve_spotify_links, daemon=True).start()
+    return {"status": "running"}
 
 
 @app.get("/api/jobs/{job_id}/export.{fmt}")

@@ -387,3 +387,40 @@ def test_failed_windows_are_retried_in_a_second_pass(mix_file, tmp_path):
     res = asyncio.run(scan(str(mix_file), opts, lambda s, d: events.append(s), recognizer=FlakyRecognizer()))
     assert "retry" in events
     assert res.recognized_windows == res.windows  # tout récupéré au second passage
+
+
+def test_odesli_resolves_spotify_links_in_mix_order():
+    from mixscanner.models import PlatformResult
+    from mixscanner.odesli import resolve_spotify_links
+
+    asked = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        src = req.url.params["url"]
+        asked.append(src)
+        if src == "https://www.deezer.com/track/1":
+            return httpx.Response(200, json={"linksByPlatform": {"spotify": {"url": "https://open.spotify.com/track/A"}}})
+        if src == "https://music.apple.com/x":
+            return httpx.Response(200, json={"linksByPlatform": {"spotify": {"url": "https://open.spotify.com/track/B"}}})
+        return httpx.Response(200, json={"linksByPlatform": {}})
+
+    tracks = [
+        _t("Glue", "Bicep", availability=[PlatformResult("deezer", "available", url="https://www.deezer.com/track/1")]),
+        _t("Opus", "Eric Prydz", links={"apple_music": "https://music.apple.com/x"}),
+        _t("ID", "ID"),
+        _t("Rare Dub", "Nobody", availability=[PlatformResult("youtube", "available", url="https://youtu.be/z")]),
+        _t("No Source", "Nobody"),
+        _t("Glue", "Bicep", availability=[PlatformResult("spotify", "available", url="https://open.spotify.com/track/A")]),
+    ]
+    progress = []
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await resolve_spotify_links(tracks, c, lambda d, t: progress.append((d, t)), delay=0)
+
+    links, missing = asyncio.run(run())
+    assert links == ["https://open.spotify.com/track/A", "https://open.spotify.com/track/B"]
+    assert [t.title for t in missing] == ["Rare Dub", "No Source"]
+    assert asked == ["https://www.deezer.com/track/1", "https://music.apple.com/x", "https://youtu.be/z"]
+    assert tracks[1].availability[0].platform == "spotify" and tracks[1].availability[0].status == "available"
+    assert progress[-1] == (5, 5)
