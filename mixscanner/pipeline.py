@@ -22,6 +22,7 @@ class ScanOptions:
     concurrency: int = 4
     min_hits: int = 1           # nb de détections minimum pour garder un morceau
     max_gap: float = 120.0
+    window_timeout: float = 150.0  # délai max par extrait, relances comprises
     start: float = 0.0
     end: float | None = None
     check_platforms: bool = True
@@ -80,6 +81,15 @@ async def recognize_windows(
     sem = asyncio.Semaphore(opts.concurrency)
     done = 0
 
+    def save_cache() -> None:
+        # Sauvegarde régulière : si le scan est interrompu, la relance reprend où il en était.
+        # Les extraits en échec ne sont pas mis en cache : ils seront retentés.
+        if not cache:
+            return
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps([{"offset": h.offset, "match": asdict(h.match) if h.match else None}
+                                     for h in hits if h.offset not in failed]))
+
     async def one(offset: float) -> None:
         nonlocal done
         if offset in cached:
@@ -87,29 +97,30 @@ async def recognize_windows(
         else:
             async with sem:
                 try:
-                    wav = await extract_clip(src.path, offset, opts.clip)
-                    hit = Hit(offset, await recognizer.recognize(wav))
+                    wav = await asyncio.wait_for(extract_clip(src.path, offset, opts.clip), 60)
+                    hit = Hit(offset, await asyncio.wait_for(recognizer.recognize(wav), opts.window_timeout))
                 except Exception as e:  # une fenêtre en échec ne doit pas arrêter le scan
                     failed[offset] = f"{type(e).__name__}: {e}"
                     on_event("warning", {"message": f"Extrait à {fmt_time(offset)} : {failed[offset]}"})
                     hit = Hit(offset, None)
         hits.append(hit)
         done += 1
+        if done % 10 == 0:
+            save_cache()
         on_event("recognize", {"done": done, "total": len(offsets), "hit": hit})
 
     await asyncio.gather(*(one(o) for o in offsets))
     hits.sort(key=lambda h: h.offset)
 
-    if failed and len(failed) >= len(hits) / 2:
+    # Échec total = problème de configuration : on l'affiche au lieu de « 0 morceau ».
+    # Échec partiel : on garde les résultats ; les extraits en échec seront retentés au prochain scan.
+    if failed and not any(h.match for h in hits):
         raise RuntimeError(
             f"La reconnaissance a échoué pour {len(failed)} extraits sur {len(hits)}. "
             f"Première erreur : {next(iter(failed.values()))}"
         )
 
-    if cache:  # les extraits en échec ne sont pas mis en cache : ils seront retentés
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps([{"offset": h.offset, "match": asdict(h.match) if h.match else None}
-                                     for h in hits if h.offset not in failed]))
+    save_cache()
     return hits
 
 

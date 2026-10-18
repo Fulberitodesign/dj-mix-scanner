@@ -2,15 +2,19 @@
 from __future__ import annotations
 
 import asyncio
+import html
+import secrets
 import threading
 import uuid
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 
+from . import spotify_playlist
 from .export import EXPORTERS
 from .pipeline import ScanOptions, ScanResult, scan
 from .tracklist import build_tracklist
@@ -117,5 +121,63 @@ def export(job_id: str, fmt: str) -> PlainTextResponse:
     if fmt not in EXPORTERS:
         raise HTTPException(400, "Format inconnu")
     media = {"csv": "text/csv", "json": "application/json", "md": "text/markdown"}.get(fmt, "text/plain")
+    filename = "playlist.txt" if fmt == "playlist" else f"tracklist.{fmt}"
     return PlainTextResponse(EXPORTERS[fmt](job.result), media_type=f"{media}; charset=utf-8",
-                             headers={"Content-Disposition": f'attachment; filename="tracklist.{fmt}"'})
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+# --- Playlist Spotify (connexion directe, nécessite une app avec la Web API) -----------
+
+_PENDING: dict[str, tuple[str, str]] = {}  # state -> (code_verifier, job_id)
+
+
+@app.get("/api/spotify/config")
+def spotify_config() -> dict[str, Any]:
+    return {"oauth": bool(spotify_playlist.client_id()), "redirect_uri": spotify_playlist.redirect_uri()}
+
+
+@app.get("/spotify/login")
+def spotify_login(job: str) -> RedirectResponse:
+    cid = spotify_playlist.client_id()
+    if not cid:
+        raise HTTPException(400, "SPOTIFY_CLIENT_ID n'est pas configuré")
+    if job not in JOBS or not JOBS[job].result:
+        raise HTTPException(404, "Analyse non terminée")
+    verifier, challenge = spotify_playlist.pkce_pair()
+    state = secrets.token_urlsafe(16)
+    _PENDING[state] = (verifier, job)
+    return RedirectResponse(spotify_playlist.authorize_url(cid, challenge, state))
+
+
+def _page(title: str, body: str) -> HTMLResponse:
+    return HTMLResponse(f"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{html.escape(title)}</title>
+<style>body{{font:16px/1.5 system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px;
+background:#111114;color:#ececf1}}a{{color:#9d86ff}}li{{color:#9a9aa6}}</style></head>
+<body><h1>{html.escape(title)}</h1>{body}<p><a href="/">← Retour à Mix Scanner</a></p></body></html>""")
+
+
+@app.get("/callback")
+async def spotify_callback(state: str = "", code: str = "", error: str = "") -> HTMLResponse:
+    pending = _PENDING.pop(state, None)
+    if error or not pending:
+        return _page("Connexion Spotify annulée", f"<p>{html.escape(error or 'Session expirée, réessayez.')}</p>")
+    verifier, job_id = pending
+    job = JOBS.get(job_id)
+    if not job or not job.result:
+        return _page("Analyse introuvable", "<p>Relancez l'analyse puis réessayez.</p>")
+    res = job.result
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            token = await spotify_playlist.exchange_code(client, spotify_playlist.client_id(), code, verifier)
+            pl = await spotify_playlist.create_playlist(
+                client, token, res.source["title"], f"Tracklist détectée par Mix Scanner — {res.source.get('url', '')}",
+                res.tracks)
+    except Exception as e:
+        return _page("Impossible de créer la playlist", f"<p>{html.escape(str(e))}</p>")
+    missing = "".join(f"<li>{html.escape(t.artist)} - {html.escape(t.title)}</li>" for t in pl.missing)
+    body = (f'<p>✅ {len(pl.added)} morceaux ajoutés. <a href="{html.escape(pl.url)}" target="_blank">'
+            f"Ouvrir la playlist dans Spotify</a></p>")
+    if missing:
+        body += f"<p>Introuvables sur Spotify ({len(pl.missing)}) :</p><ul>{missing}</ul>"
+    return _page("Playlist Spotify créée", body)

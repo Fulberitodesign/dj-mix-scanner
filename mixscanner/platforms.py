@@ -162,7 +162,7 @@ class PlatformChecker:
 
         def run():
             import yt_dlp
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 15}) as ydl:
                 return ydl.extract_info(f"ytsearch5:{_query(t)}", download=False).get("entries", [])
 
         entries = await asyncio.to_thread(run)
@@ -177,12 +177,13 @@ class PlatformChecker:
             "spotify": self.spotify, "soundcloud": self.soundcloud, "deezer": self.deezer,
             "apple_music": self.apple_music, "youtube": self.youtube_search,
         }
-        results = await asyncio.gather(*(fn(t) for fn in checks.values()), return_exceptions=True)
+        results = await asyncio.gather(*(asyncio.wait_for(fn(t), 45) for fn in checks.values()),
+                                       return_exceptions=True)
         surls = search_urls(t)
         out: list[PlatformResult] = []
         for name, res in zip(checks, results):
             if isinstance(res, Exception):
-                res = PlatformResult(name, "error", search_url=surls[name], note=str(res)[:200])
+                res = PlatformResult(name, "error", search_url=surls[name], note=f"{type(res).__name__}: {res}"[:200])
             out.append(res)
         out.append(PlatformResult("beatport", "unverified", search_url=surls["beatport"]))
         out.append(PlatformResult("google", "unverified", search_url=surls["google"]))

@@ -6,7 +6,7 @@ import io
 import json
 
 from .classify import KIND_LABELS_FR
-from .models import fmt_time
+from .models import fmt_time, normalize
 from .pipeline import ScanResult
 
 PLATFORM_NAMES = {
@@ -77,4 +77,17 @@ def to_markdown(res: ScanResult) -> str:
     return "\n".join(out) + "\n"
 
 
-EXPORTERS = {"txt": to_text, "csv": to_csv, "json": to_json, "md": to_markdown}
+def to_playlist(res: ScanResult) -> str:
+    """Une ligne « Artiste - Titre » par morceau (sans doublons ni « ID »), à coller dans
+    Spotlistr / TuneMyMusic / Soundiiz pour créer la playlist."""
+    lines: list[str] = []
+    for t in res.tracks:
+        if not t.title or normalize(t.title) == "id":
+            continue
+        line = f"{t.artist} - {t.title}" if t.artist else t.title
+        if line not in lines:
+            lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+EXPORTERS = {"txt": to_text, "csv": to_csv, "json": to_json, "md": to_markdown, "playlist": to_playlist}

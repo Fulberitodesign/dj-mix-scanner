@@ -55,6 +55,17 @@ python -m mixscanner mon_mix.mp3 --start 1800 --end 3600 --no-platforms
 Un mix d'1 h ≈ 120 extraits. Les résultats sont mis en cache (`~/.cache/mixscanner`) :
 relancer la même vidéo ne refait pas la reconnaissance.
 
+## Créer une playlist Spotify
+
+À la fin de l'analyse, la page propose un panneau **« Créer une playlist Spotify »** :
+
+- **Sans Spotify Premium** : « Copier la liste » copie une ligne « Artiste - Titre » par morceau
+  (sans doublons ni « ID »). Collez-la dans [Spotlistr](https://www.spotlistr.com/search/textbox)
+  ou [TuneMyMusic](https://www.tunemymusic.com/fr/transfer), connectez votre compte Spotify : la playlist est créée.
+- **Connexion directe** (si `SPOTIFY_CLIENT_ID` est défini et que l'app Spotify a la « Web API », réservée
+  aux comptes Premium) : l'outil crée lui-même la playlist privée sur votre compte. Ajoutez
+  `http://127.0.0.1:8000/callback` dans les « Redirect URIs » de l'app.
+
 ## Clés optionnelles (variables d'environnement)
 
 | Variable | Utilité |

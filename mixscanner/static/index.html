@@ -55,6 +55,15 @@
   .plat.unverified, .plat.error { color: var(--muted); }
   .legend { color: var(--muted); font-size: 13px; margin-top: 12px; }
   .err { color: var(--ko); }
+  #playlist { margin-top: 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  #playlist h2 { margin: 0 0 8px; font-size: 18px; }
+  #playlist p { margin: 8px 0; color: var(--muted); }
+  #playlist textarea { width: 100%; height: 140px; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: 13px/1.4 ui-monospace, Menlo, monospace; resize: vertical; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  a.btn { display: inline-block; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line);
+    color: var(--text); text-decoration: none; font-size: 14px; }
+  a.btn.spotify { background: #1db954; border-color: #1db954; color: #000; font-weight: 600; }
   @media (max-width: 560px) { li.track { grid-template-columns: 56px 1fr; } .cover { display: none; } }
 </style>
 </head>
@@ -92,6 +101,22 @@
   </div>
   <ol id="list"></ol>
   <p class="legend" id="legend" hidden>Vert : disponible (même version) · Orange : trouvé mais autre version · Rouge : introuvable · Gris : lien de recherche non vérifié</p>
+
+  <section id="playlist" hidden>
+    <h2>🎵 Créer une playlist Spotify</h2>
+    <p><strong>Sans Spotify Premium :</strong> copiez la liste, ouvrez Spotlistr (gratuit), collez-la, connectez-vous à Spotify et créez la playlist.</p>
+    <textarea id="pl-text" readonly></textarea>
+    <div class="row">
+      <button class="primary" id="pl-copy" type="button">📋 Copier la liste</button>
+      <a class="btn spotify" href="https://www.spotlistr.com/search/textbox" target="_blank" rel="noopener">Ouvrir Spotlistr</a>
+      <a class="btn" href="https://www.tunemymusic.com/fr/transfer" target="_blank" rel="noopener">ou TuneMyMusic</a>
+      <a class="btn" id="pl-dl">Télécharger (.txt)</a>
+    </div>
+    <div id="pl-direct" hidden>
+      <p><strong>Connexion directe :</strong> l'outil crée la playlist lui-même sur votre compte (app Spotify avec Web API requise).</p>
+      <div class="row"><a class="btn spotify" id="pl-oauth">Créer la playlist sur mon compte Spotify</a></div>
+    </div>
+  </section>
 </main>
 
 <script>
@@ -110,7 +135,7 @@ let timer = null;
 $("f").addEventListener("submit", async (e) => {
   e.preventDefault();
   clearTimeout(timer);
-  $("list").innerHTML = ""; $("head").hidden = true; $("exports").hidden = true; $("legend").hidden = true;
+  $("list").innerHTML = ""; $("head").hidden = true; $("playlist").hidden = true; $("exports").hidden = true; $("legend").hidden = true;
   $("go").disabled = true;
   $("warn").textContent = "";
   $("status").textContent = "Démarrage…";
@@ -121,6 +146,25 @@ $("f").addEventListener("submit", async (e) => {
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     poll((await r.json()).id);
   } catch (err) { fail(err.message); }
+});
+
+async function showPlaylist(id) {
+  const text = await (await fetch(`/api/jobs/${id}/export.playlist`)).text();
+  const n = text.trim() ? text.trim().split("\n").length : 0;
+  if (!n) return;
+  $("pl-text").value = text;
+  $("pl-copy").textContent = `📋 Copier la liste (${n} morceaux)`;
+  $("pl-dl").href = `/api/jobs/${id}/export.playlist`;
+  $("pl-oauth").href = `/spotify/login?job=${id}`;
+  try { $("pl-direct").hidden = !(await (await fetch("/api/spotify/config")).json()).oauth; } catch (e) {}
+  $("playlist").hidden = false;
+}
+
+$("pl-copy").addEventListener("click", async () => {
+  const ta = $("pl-text");
+  try { await navigator.clipboard.writeText(ta.value); }
+  catch (e) { ta.focus(); ta.select(); document.execCommand("copy"); }
+  $("pl-copy").textContent = "✅ Copié ! Collez-le dans Spotlistr";
 });
 
 function fail(msg) { $("status").innerHTML = `<span class="err">Erreur : ${esc(msg)}</span>`; $("go").disabled = false; }
@@ -136,6 +180,7 @@ async function poll(id) {
     $("prog").style.width = "100%";
     for (const f of ["txt", "csv", "md", "json"]) $(`x-${f}`).href = `/api/jobs/${id}/export.${f}`;
     $("exports").hidden = false;
+    showPlaylist(id);
     return;
   }
   timer = setTimeout(() => poll(id), 1500);

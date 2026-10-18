@@ -270,3 +270,96 @@ def test_bundled_ffmpeg_is_exposed_on_path(monkeypatch, tmp_path, mix_file):
         assert asyncio.run(signature()).signature.samples > 0
     finally:
         audio.ffmpeg_exe.cache_clear()
+
+
+# --- blocages et playlist -------------------------------------------------------------
+
+class HangingRecognizer:
+    """Répond normalement sauf sur certains extraits où il ne répond jamais (comme Shazam saturé)."""
+    name = "hang"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def recognize(self, wav: bytes):
+        self.calls += 1
+        if self.calls % 2 == 0:
+            await asyncio.sleep(3600)
+        return await FrequencyRecognizer().recognize(wav)
+
+
+def test_hanging_requests_do_not_freeze_the_scan(mix_file, tmp_path):
+    warnings = []
+    opts = ScanOptions(step=20, clip=10, check_platforms=False, cache_dir=tmp_path, window_timeout=0.5)
+    res = asyncio.run(scan(str(mix_file), opts, lambda s, d: s == "warning" and warnings.append(d),
+                           recognizer=HangingRecognizer()))
+    assert res.recognized_windows > 0 and warnings  # résultats partiels gardés, échecs signalés
+    assert [t.title for t in res.tracks] == ["Track A", "Track B (Fisher Remix)", "Track C"]
+
+
+def _result_with(tracks):
+    from mixscanner.pipeline import ScanResult
+    return ScanResult(source={"title": "Mix", "url": "u"}, tracks=tracks, windows=0, recognized_windows=0,
+                      description_entries=0)
+
+
+def _t(title, artist, **kw):
+    return Track(index=0, start=0, end=0, title=title, artist=artist, version=classify(title), **kw)
+
+
+def test_playlist_export_dedupes_and_skips_ids():
+    res = _result_with([_t("Glue", "Bicep"), _t("ID", "ID"), _t("Opus", "Eric Prydz"), _t("Glue", "Bicep")])
+    assert EXPORTERS["playlist"](res) == "Bicep - Glue\nEric Prydz - Opus\n"
+
+
+def test_create_spotify_playlist_with_endpoint_fallback():
+    from mixscanner.models import PlatformResult
+    from mixscanner.spotify_playlist import create_playlist
+
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append((req.method, req.url.path))
+        path = req.url.path
+        if path == "/v1/search":
+            return httpx.Response(200, json={"tracks": {"items": [
+                {"name": "Opus", "artists": [{"name": "Eric Prydz"}], "uri": "spotify:track:opus"}]}})
+        if path == "/v1/me" and req.method == "GET":
+            return httpx.Response(200, json={"id": "dj"})
+        if path == "/v1/me/playlists":
+            return httpx.Response(404)  # ancien point d'accès seulement
+        if path == "/v1/users/dj/playlists":
+            assert json.loads(req.content)["name"] == "Mon mix"
+            return httpx.Response(201, json={"id": "pl1", "external_urls": {"spotify": "https://open.spotify.com/playlist/pl1"}})
+        if path == "/v1/playlists/pl1/items":
+            assert json.loads(req.content)["uris"] == ["spotify:track:glue", "spotify:track:opus"]
+            return httpx.Response(201, json={"snapshot_id": "x"})
+        return httpx.Response(404)
+
+    tracks = [
+        _t("Glue", "Bicep", availability=[PlatformResult("spotify", "available", url="https://open.spotify.com/track/glue")]),
+        _t("Opus", "Eric Prydz"),
+        _t("Glue", "Bicep", availability=[PlatformResult("spotify", "available", url="https://open.spotify.com/intl-fr/track/glue")]),
+        _t("ID", "ID"),
+    ]
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await create_playlist(c, "tok", "Mon mix", "desc", tracks)
+
+    pl = asyncio.run(run())
+    assert pl.url.endswith("/pl1")
+    assert [t.title for t in pl.added] == ["Glue", "Opus"] and pl.missing == []
+    assert ("POST", "/v1/me/playlists") in calls and ("POST", "/v1/users/dj/playlists") in calls
+
+
+def test_spotify_403_gives_clear_message():
+    from mixscanner.spotify_playlist import create_playlist
+
+    async def run():
+        transport = httpx.MockTransport(lambda req: httpx.Response(403, text="forbidden"))
+        async with httpx.AsyncClient(transport=transport) as c:
+            await create_playlist(c, "tok", "Mix", "", [_t("Glue", "Bicep")])
+
+    with pytest.raises(RuntimeError, match="Web API"):
+        asyncio.run(run())

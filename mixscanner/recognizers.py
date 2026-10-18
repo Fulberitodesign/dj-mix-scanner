@@ -23,10 +23,12 @@ class Recognizer(Protocol):
     async def recognize(self, wav: bytes) -> Match | None: ...
 
 
-async def _with_retries(coro_factory, attempts: int = 4, base_delay: float = 2.0):
+async def _with_retries(coro_factory, attempts: int = 4, base_delay: float = 2.0, timeout: float = 25.0):
+    """Relance en cas d'échec ; chaque tentative est limitée à `timeout` secondes
+    (Shazam peut laisser une requête pendante indéfiniment quand il limite le débit)."""
     for i in range(attempts):
         try:
-            return await coro_factory()
+            return await asyncio.wait_for(coro_factory(), timeout)
         except Exception:
             if i == attempts - 1:
                 raise
