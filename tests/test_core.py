@@ -262,8 +262,11 @@ def test_bundled_ffmpeg_is_exposed_on_path(monkeypatch, tmp_path, mix_file):
         exe = audio.ffmpeg_exe()
         assert shutil.which("ffmpeg") == exe
         from shazamio import Shazam
-        wav = asyncio.run(extract_clip(mix_file, 5, 10))
-        sig = asyncio.run(Shazam().core_recognizer.recognize_bytes(value=wav, options=None))
-        assert sig.signature.samples > 0
+
+        async def signature():
+            wav = await extract_clip(mix_file, 5, 10)
+            return await Shazam().core_recognizer.recognize_bytes(value=wav, options=None)
+
+        assert asyncio.run(signature()).signature.samples > 0
     finally:
         audio.ffmpeg_exe.cache_clear()
