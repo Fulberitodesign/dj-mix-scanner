@@ -90,14 +90,14 @@ class Job:
         def progress(done: int, total: int) -> None:
             self.spotify_links.update(done=done, total=total)
 
-        async def run() -> tuple[list[str], list]:
+        async def run() -> tuple[list[str], list, dict]:
             async with httpx.AsyncClient(timeout=20) as client:
                 return await odesli.resolve_spotify_links(self.result.tracks, client, progress)
 
         self.spotify_links = {"status": "running", "done": 0, "total": 0}
         try:
-            links, missing = asyncio.run(run())
-            self.spotify_links = {"status": "done", "links": links,
+            links, missing, diag = asyncio.run(run())
+            self.spotify_links = {"status": "done", "links": links, "diag": diag,
                                   "missing": [f"{t.artist} - {t.title}" for t in missing]}
         except Exception as e:
             self.spotify_links = {"status": "error", "error": f"{type(e).__name__}: {e}"}

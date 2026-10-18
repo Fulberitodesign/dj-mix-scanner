@@ -181,8 +181,13 @@ async function pollSpotifyLinks(id) {
   if (st.status !== "done") return;
   $("sl-status").textContent = `${st.links.length ? "✅" : "⚠️"} ${st.links.length} liens Spotify trouvés`;
   $("sl-text").value = st.links.join("\n");
+  const d = st.diag || {};
+  const why = [];
+  if (d.not_on_spotify) why.push(`${d.not_on_spotify} absents de Spotify`);
+  if (d.no_source) why.push(`${d.no_source} introuvables sur Deezer / Apple Music`);
+  if (d.errors) why.push(`${d.errors} erreurs song.link (${d.first_error})`);
   $("sl-missing").textContent = st.missing.length
-    ? `Introuvables sur Spotify (${st.missing.length}) : ${st.missing.join(" · ")}` : "";
+    ? `Sans lien Spotify (${st.missing.length}${why.length ? " — " + why.join(", ") : ""}) : ${st.missing.join(" · ")}` : "";
   $("sl-result").hidden = false;
 }
 

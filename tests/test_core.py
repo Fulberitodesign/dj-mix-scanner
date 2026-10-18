@@ -396,6 +396,8 @@ def test_odesli_resolves_spotify_links_in_mix_order():
     asked = []
 
     def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.host != "api.song.link":  # recherches Deezer / Apple : rien trouvé
+            return httpx.Response(200, json={"data": [], "results": []})
         src = req.url.params["url"]
         asked.append(src)
         if src == "https://www.deezer.com/track/1":
@@ -418,9 +420,45 @@ def test_odesli_resolves_spotify_links_in_mix_order():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
             return await resolve_spotify_links(tracks, c, lambda d, t: progress.append((d, t)), delay=0)
 
-    links, missing = asyncio.run(run())
+    links, missing, diag = asyncio.run(run())
     assert links == ["https://open.spotify.com/track/A", "https://open.spotify.com/track/B"]
     assert [t.title for t in missing] == ["Rare Dub", "No Source"]
     assert asked == ["https://www.deezer.com/track/1", "https://music.apple.com/x", "https://youtu.be/z"]
+    assert diag["not_on_spotify"] == 1 and diag["no_source"] == 1
     assert tracks[1].availability[0].platform == "spotify" and tracks[1].availability[0].status == "available"
     assert progress[-1] == (5, 5)
+
+
+
+def test_odesli_searches_deezer_when_track_has_no_link():
+    from mixscanner.odesli import resolve_spotify_links
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.host == "api.deezer.com":
+            return httpx.Response(200, json={"data": [
+                {"title": "Umbrella", "link": "https://www.deezer.com/track/9", "artist": {"name": "Rihanna"}}]})
+        if req.url.host == "api.song.link":
+            assert req.url.params["url"] == "https://www.deezer.com/track/9"
+            return httpx.Response(200, json={"linksByPlatform": {"spotify": {"url": "https://open.spotify.com/track/U"}}})
+        return httpx.Response(200, json={"results": []})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await resolve_spotify_links([_t("Umbrella (feat. JAY-Z)", "Rihanna")], c, delay=0)
+
+    links, missing, diag = asyncio.run(run())
+    assert links == ["https://open.spotify.com/track/U"] and missing == []
+
+
+def test_odesli_errors_are_reported():
+    from mixscanner.models import PlatformResult
+    from mixscanner.odesli import resolve_spotify_links
+
+    async def run():
+        transport = httpx.MockTransport(lambda req: httpx.Response(500, text="boom"))
+        async with httpx.AsyncClient(transport=transport) as c:
+            t = _t("Glue", "Bicep", availability=[PlatformResult("deezer", "available", url="https://www.deezer.com/track/1")])
+            return await resolve_spotify_links([t], c, delay=0)
+
+    links, missing, diag = asyncio.run(run())
+    assert links == [] and diag["errors"] == 1 and "500" in diag["first_error"]
