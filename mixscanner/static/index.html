@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mix Scanner</title>
+<style>
+  :root {
+    --bg: #f6f6f8; --panel: #fff; --text: #17171c; --muted: #6b6b76; --line: #e3e3e8;
+    --accent: #6d4aff; --ok: #138a4f; --ko: #c0392b; --warn: #b7791f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111114; --panel: #1b1b20; --text: #ececf1; --muted: #9a9aa6; --line: #2c2c34;
+      --accent: #9d86ff; --ok: #3ccf87; --ko: #ff6b5e; --warn: #f0b44c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  form { display: flex; flex-wrap: wrap; gap: 8px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px; }
+  input[type=url] { flex: 1 1 380px; min-width: 0; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 15px; }
+  select, button { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font-size: 14px; }
+  button.primary { background: var(--accent); color: #fff; border: 0; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  label.opt { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; }
+  #status { margin: 20px 0 8px; color: var(--muted); min-height: 1.4em; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;
+    margin-top: 24px; }
+  .head h2 { margin: 0; font-size: 18px; }
+  .exports a { color: var(--accent); margin-left: 12px; font-size: 14px; }
+  ol { list-style: none; padding: 0; margin: 12px 0 0; }
+  li.track { display: grid; grid-template-columns: 70px 52px 1fr; gap: 12px; align-items: start;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 8px; }
+  .time { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .time a { color: var(--accent); text-decoration: none; }
+  .cover { width: 52px; height: 52px; border-radius: 6px; background: var(--line); object-fit: cover; }
+  .title { font-weight: 600; }
+  .artist { color: var(--muted); }
+  .tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.kind { border-color: var(--accent); color: var(--accent); }
+  .plats { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .plat { font-size: 12px; padding: 3px 8px; border-radius: 6px; text-decoration: none;
+    border: 1px solid var(--line); color: var(--text); }
+  .plat.available { border-color: var(--ok); color: var(--ok); }
+  .plat.other { border-color: var(--warn); color: var(--warn); }
+  .plat.not_found { color: var(--ko); border-color: var(--ko); opacity: .75; }
+  .plat.unverified, .plat.error { color: var(--muted); }
+  .legend { color: var(--muted); font-size: 13px; margin-top: 12px; }
+  .err { color: var(--ko); }
+  @media (max-width: 560px) { li.track { grid-template-columns: 56px 1fr; } .cover { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>🎧 Mix Scanner</h1>
+  <p class="sub">Collez le lien d'un mix DJ (YouTube, SoundCloud, Mixcloud…) : chaque morceau est identifié dans l'ordre, avec sa version et sa disponibilité sur les plateformes.</p>
+
+  <form id="f">
+    <input type="url" id="url" placeholder="https://www.youtube.com/watch?v=…" required>
+    <select id="step" title="Fréquence d'analyse">
+      <option value="20">Précis (toutes les 20 s)</option>
+      <option value="30" selected>Normal (toutes les 30 s)</option>
+      <option value="45">Rapide (toutes les 45 s)</option>
+    </select>
+    <select id="rec" title="Service de reconnaissance">
+      <option value="shazam">Shazam</option>
+      <option value="acrcloud">ACRCloud</option>
+      <option value="audd">AudD</option>
+    </select>
+    <label class="opt"><input type="checkbox" id="plat" checked> Vérifier les plateformes</label>
+    <button class="primary" id="go">Analyser</button>
+  </form>
+
+  <div id="status"></div>
+  <div class="bar"><div id="prog"></div></div>
+
+  <div class="head" id="head" hidden>
+    <h2 id="mixtitle"></h2>
+    <div class="exports" id="exports" hidden>
+      Exporter :
+      <a id="x-txt">Texte</a><a id="x-csv">CSV</a><a id="x-md">Markdown</a><a id="x-json">JSON</a>
+    </div>
+  </div>
+  <ol id="list"></ol>
+  <p class="legend" id="legend" hidden>Vert : disponible (même version) · Orange : trouvé mais autre version · Rouge : introuvable · Gris : lien de recherche non vérifié</p>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const KINDS = { original: "Original", remix: "Remix", mashup: "Mashup", edit: "Edit", bootleg: "Bootleg",
+  vip: "VIP", extended: "Version longue", dub: "Dub", acapella: "A cappella", instrumental: "Instrumental",
+  live: "Live", cover: "Reprise" };
+const PLATS = { spotify: "Spotify", soundcloud: "SoundCloud", deezer: "Deezer", apple_music: "Apple Music",
+  youtube: "YouTube", beatport: "Beatport", google: "Google" };
+const STAGES = { queued: "En attente…", download: "Téléchargement de l'audio", source: "Préparation",
+  recognize: "Reconnaissance des morceaux", tracklist: "Construction de la tracklist",
+  platforms: "Vérification des plateformes" };
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let timer = null;
+
+$("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  clearTimeout(timer);
+  $("list").innerHTML = ""; $("head").hidden = true; $("exports").hidden = true; $("legend").hidden = true;
+  $("go").disabled = true;
+  $("status").textContent = "Démarrage…";
+  try {
+    const r = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: $("url").value, step: +$("step").value, recognizer: $("rec").value,
+        check_platforms: $("plat").checked }) });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    poll((await r.json()).id);
+  } catch (err) { fail(err.message); }
+});
+
+function fail(msg) { $("status").innerHTML = `<span class="err">Erreur : ${esc(msg)}</span>`; $("go").disabled = false; }
+
+async function poll(id) {
+  let job;
+  try { job = await (await fetch(`/api/jobs/${id}`)).json(); } catch (e) { timer = setTimeout(() => poll(id), 2000); return; }
+  render(job);
+  if (job.status === "error") return fail(job.error);
+  if (job.status === "done") {
+    $("go").disabled = false;
+    $("status").textContent = `Terminé : ${job.tracks.length} morceaux identifiés.`;
+    $("prog").style.width = "100%";
+    for (const f of ["txt", "csv", "md", "json"]) $(`x-${f}`).href = `/api/jobs/${id}/export.${f}`;
+    $("exports").hidden = false;
+    return;
+  }
+  timer = setTimeout(() => poll(id), 1500);
+}
+
+function render(job) {
+  const pct = Math.round((job.progress || 0) * 100);
+  $("prog").style.width = pct + "%";
+  if (job.status === "running" || job.status === "queued")
+    $("status").textContent = `${STAGES[job.stage] || job.stage}… ${pct} % · ${job.tracks.length} morceaux trouvés`;
+  if (job.source) { $("head").hidden = false; $("mixtitle").textContent = job.source.title; }
+  const ytid = job.source && job.source.url && job.source.url.includes("youtu") ? job.source.video_id : null;
+  $("list").innerHTML = job.tracks.map((t) => trackHTML(t, ytid)).join("");
+  $("legend").hidden = !job.tracks.some((t) => t.availability.length);
+}
+
+function trackHTML(t, ytid) {
+  const time = ytid
+    ? `<a href="https://www.youtube.com/watch?v=${esc(ytid)}&t=${Math.floor(t.start)}s" target="_blank" rel="noopener">${t.start_str}</a>`
+    : t.start_str;
+  const kind = KINDS[t.version.kind] || t.version.kind;
+  const tags = [`<span class="tag kind">${esc(kind)}${t.version.label && t.version.kind !== "original" ? " · " + esc(t.version.label) : ""}</span>`];
+  if (t.source === "description") tags.push(`<span class="tag">d'après la description</span>`);
+  if (t.source === "audio+description") tags.push(`<span class="tag">confirmé par la description</span>`);
+  if (t.source !== "description") tags.push(`<span class="tag">confiance ${t.confidence === "high" ? "élevée" : t.confidence === "medium" ? "moyenne" : "faible"}</span>`);
+  if (t.label) tags.push(`<span class="tag">${esc(t.label)}</span>`);
+  if (t.year) tags.push(`<span class="tag">${esc(t.year)}</span>`);
+  const plats = t.availability.map((p) => {
+    const url = p.url || p.search_url;
+    let cls = p.status, txt = PLATS[p.platform] || p.platform;
+    if (p.status === "available" && p.same_version === false) { cls = "other"; txt += " (autre version)"; }
+    if (p.status === "unverified" || p.status === "error") txt = "🔎 " + txt;
+    const title = p.matched_title || p.note || "";
+    return `<a class="plat ${cls}" href="${esc(url)}" target="_blank" rel="noopener" title="${esc(title)}">${esc(txt)}</a>`;
+  }).join("");
+  const cover = t.cover ? `<img class="cover" src="${esc(t.cover)}" alt="" loading="lazy">` : `<div class="cover"></div>`;
+  return `<li class="track"><div class="time">${time}</div>${cover}<div>
+    <div class="title">${esc(t.title)}</div><div class="artist">${esc(t.artist)}</div>
+    <div class="tags">${tags.join("")}</div>${plats ? `<div class="plats">${plats}</div>` : ""}</div></li>`;
+}
+</script>
+</body>
+</html>
