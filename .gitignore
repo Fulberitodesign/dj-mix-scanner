@@ -4,3 +4,5 @@ __pycache__/
 .cache/
 output/
 .pytest_cache/
+bin/
+mix-scanner.zip
