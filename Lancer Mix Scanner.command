@@ -27,24 +27,9 @@ if [ -z "$PY" ]; then
 fi
 echo "✔ Python : $("$PY" --version)"
 
-# 2. ffmpeg / ffprobe : version autonome téléchargée dans le dossier de l'outil
-mkdir -p bin
-export PATH="$PWD/bin:$PATH"
-for tool in ffmpeg ffprobe; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "Téléchargement de $tool…"
-    curl -fL --progress-bar -o "bin/$tool.zip" "https://evermeet.cx/ffmpeg/getrelease/$tool/zip" || pause_exit
-    unzip -o -q "bin/$tool.zip" -d bin && rm "bin/$tool.zip"
-    chmod +x "bin/$tool"
-    xattr -d com.apple.quarantine "bin/$tool" 2>/dev/null
-  fi
-done
-ffmpeg -version >/dev/null 2>&1 || { echo "❌ ffmpeg ne démarre pas sur ce Mac."; pause_exit; }
-echo "✔ ffmpeg"
-
-# 3. L'outil lui-même
+# 2. L'outil (ffmpeg est fourni par le paquet imageio-ffmpeg)
 if [ ! -x .venv/bin/python ]; then
-  echo "Installation de l'outil (première fois uniquement, quelques minutes)…"
+  echo "Installation de l'outil (premiere fois uniquement, quelques minutes)..."
   "$PY" -m venv .venv || pause_exit
 fi
 source .venv/bin/activate

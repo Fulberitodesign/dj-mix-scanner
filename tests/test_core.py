@@ -8,6 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from mixscanner.audio import ffmpeg_exe
 from mixscanner.classify import classify, same_version
 from mixscanner.export import EXPORTERS
 from mixscanner.models import Hit, Match, Track
@@ -209,7 +210,7 @@ def mix_file(tmp_path_factory) -> Path:
     for i, (start, end, f, _) in enumerate(SECTIONS):
         inputs += ["-f", "lavfi", "-i", f"sine=frequency={f}:duration={end - start}"]
         filters.append(f"[{i}:a]")
-    subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex",
+    subprocess.run([ffmpeg_exe(), "-v", "error", "-y", *inputs, "-filter_complex",
                     "".join(filters) + f"concat=n={len(SECTIONS)}:v=0:a=1", str(path)], check=True)
     return path
 

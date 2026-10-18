@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
+import re
 import shutil
 import subprocess
+from functools import cache
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -23,17 +24,26 @@ class MixSource:
     video_id: str | None = None
 
 
-def _require_ffmpeg() -> None:
-    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
-        raise RuntimeError("ffmpeg/ffprobe est requis (https://ffmpeg.org/download.html).")
+@cache
+def ffmpeg_exe() -> str:
+    """ffmpeg du système, sinon celui fourni par le paquet imageio-ffmpeg (aucune installation à faire)."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        raise RuntimeError("ffmpeg est introuvable : pip install imageio-ffmpeg") from None
 
 
 def probe_duration(path: Path) -> float:
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)],
-        capture_output=True, text=True, check=True,
-    )
-    return float(json.loads(out.stdout)["format"]["duration"])
+    out = subprocess.run([ffmpeg_exe(), "-hide_banner", "-i", str(path)], capture_output=True, text=True)
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", out.stderr)
+    if not m:
+        raise RuntimeError(f"Impossible de lire la durée de {path}")
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
 
 
 def load_source(
@@ -42,7 +52,6 @@ def load_source(
     on_progress: Callable[[float], None] | None = None,
 ) -> MixSource:
     """Télécharge la piste audio d'un lien (ou ouvre un fichier local)."""
-    _require_ffmpeg()
     local = Path(url_or_path).expanduser()
     if local.exists():
         return MixSource(path=local, title=local.stem, duration=probe_duration(local))
@@ -64,6 +73,7 @@ def load_source(
         "quiet": True,
         "no_warnings": True,
         "progress_hooks": [hook],
+        "ffmpeg_location": ffmpeg_exe(),
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url_or_path, download=True)
@@ -84,7 +94,7 @@ def load_source(
 async def extract_clip(path: Path, offset: float, length: float) -> bytes:
     """Extrait `length` secondes à partir de `offset`, en WAV mono 16 kHz (en mémoire)."""
     proc = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-nostdin", "-v", "error",
+        ffmpeg_exe(), "-nostdin", "-v", "error",
         "-ss", f"{offset:.2f}", "-i", str(path), "-t", f"{length:.2f}",
         "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1",
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
