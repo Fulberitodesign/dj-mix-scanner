@@ -26,16 +26,28 @@ class MixSource:
 
 @cache
 def ffmpeg_exe() -> str:
-    """ffmpeg du système, sinon celui fourni par le paquet imageio-ffmpeg (aucune installation à faire)."""
+    """ffmpeg du système, sinon celui fourni par le paquet imageio-ffmpeg (aucune installation à faire).
+
+    Dans ce second cas, un lien nommé « ffmpeg » est ajouté au PATH : le module Shazam
+    (shazamio_core) appelle « ffmpeg » directement et ne trouverait pas le binaire sinon.
+    """
     found = shutil.which("ffmpeg")
     if found:
         return found
     try:
         import imageio_ffmpeg
 
-        return imageio_ffmpeg.get_ffmpeg_exe()
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
     except Exception:
         raise RuntimeError("ffmpeg est introuvable : pip install imageio-ffmpeg") from None
+    bin_dir = default_cache_dir() / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    link = bin_dir / "ffmpeg"
+    if not link.exists() or link.resolve() != Path(exe).resolve():
+        link.unlink(missing_ok=True)
+        link.symlink_to(exe)
+    os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+    return str(link)
 
 
 def probe_duration(path: Path) -> float:

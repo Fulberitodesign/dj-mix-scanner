@@ -247,3 +247,23 @@ def test_certifi_bundle_is_configured():
     import os
     import mixscanner  # noqa: F401
     assert os.environ.get("SSL_CERT_FILE")
+
+
+def test_bundled_ffmpeg_is_exposed_on_path(monkeypatch, tmp_path, mix_file):
+    """shazamio_core appelle « ffmpeg » directement : il doit être trouvable même sans ffmpeg système."""
+    import shutil
+    from mixscanner import audio
+    from mixscanner.audio import extract_clip
+
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    monkeypatch.setenv("MIXSCANNER_CACHE", str(tmp_path / "cache"))
+    audio.ffmpeg_exe.cache_clear()
+    try:
+        exe = audio.ffmpeg_exe()
+        assert shutil.which("ffmpeg") == exe
+        from shazamio import Shazam
+        wav = asyncio.run(extract_clip(mix_file, 5, 10))
+        sig = asyncio.run(Shazam().core_recognizer.recognize_bytes(value=wav, options=None))
+        assert sig.signature.samples > 0
+    finally:
+        audio.ffmpeg_exe.cache_clear()

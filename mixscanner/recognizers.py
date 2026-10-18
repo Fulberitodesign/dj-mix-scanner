@@ -39,6 +39,9 @@ class ShazamRecognizer:
     def __init__(self) -> None:
         from shazamio import Shazam
 
+        from .audio import ffmpeg_exe
+
+        ffmpeg_exe()  # shazamio_core a besoin de « ffmpeg » dans le PATH
         self._shazam = Shazam()
 
     async def recognize(self, wav: bytes) -> Match | None:
