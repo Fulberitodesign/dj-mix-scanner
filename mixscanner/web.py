@@ -42,6 +42,7 @@ class Job:
         self.hits: list = []
         self.tracks: list = []
         self.warnings: list[str] = []
+        self.warning_count = 0
         self.error: str | None = None
         self.result: ScanResult | None = None
         self.lock = threading.Lock()
@@ -50,6 +51,10 @@ class Job:
         with self.lock:
             if stage == "warning":
                 self.warnings = (self.warnings + [data["message"]])[-20:]
+                self.warning_count += 1
+                return
+            if stage == "retry":
+                self.stage = "retry"
                 return
             self.stage = stage
             if stage == "download":
@@ -57,7 +62,7 @@ class Job:
             elif stage == "source":
                 self.source = data
             elif stage == "recognize":
-                self.hits.append(data["hit"])
+                self.hits = [h for h in self.hits if h.offset != data["hit"].offset] + [data["hit"]]
                 self.progress = data["done"] / data["total"]
                 # tracklist provisoire, affichée en direct
                 self.tracks = build_tracklist(self.hits, self.req.clip, (self.source or {}).get("duration"))
@@ -83,7 +88,7 @@ class Job:
         with self.lock:
             return {
                 "id": self.id, "status": self.status, "stage": self.stage, "progress": self.progress,
-                "source": self.source, "error": self.error, "warnings": self.warnings,
+                "source": self.source, "error": self.error, "warnings": self.warnings, "warning_count": self.warning_count,
                 "windows_done": len(self.hits), "tracks": [t.to_dict() for t in self.tracks],
             }
 

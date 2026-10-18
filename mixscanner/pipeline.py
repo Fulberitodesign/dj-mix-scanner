@@ -19,7 +19,8 @@ class ScanOptions:
     step: float = 30.0          # un extrait analysé toutes les N secondes
     clip: float = 12.0          # durée de chaque extrait
     recognizer: str = "shazam"  # shazam | acrcloud | audd
-    concurrency: int = 4
+    concurrency: int = 2        # requêtes simultanées (Shazam sature au-delà)
+    cooldown: float = 15.0      # pause commune après un échec (s)
     min_hits: int = 1           # nb de détections minimum pour garder un morceau
     max_gap: float = 120.0
     window_timeout: float = 150.0  # délai max par extrait, relances comprises
@@ -90,19 +91,34 @@ async def recognize_windows(
         cache.write_text(json.dumps([{"offset": h.offset, "match": asdict(h.match) if h.match else None}
                                      for h in hits if h.offset not in failed]))
 
+    loop = asyncio.get_running_loop()
+    cooldown_until = 0.0
+
+    async def attempt(offset: float) -> Hit:
+        """Reconnaît un extrait. En cas d'échec (Shazam saturé), tous les extraits marquent
+        une pause commune avant de continuer, pour laisser le service respirer."""
+        nonlocal cooldown_until
+        async with sem:
+            while (wait := cooldown_until - loop.time()) > 0:
+                await asyncio.sleep(wait)
+            try:
+                wav = await asyncio.wait_for(extract_clip(src.path, offset, opts.clip), 60)
+                hit = Hit(offset, await asyncio.wait_for(recognizer.recognize(wav), opts.window_timeout))
+                failed.pop(offset, None)
+                return hit
+            except Exception as e:  # une fenêtre en échec ne doit pas arrêter le scan
+                if isinstance(e, asyncio.TimeoutError):
+                    failed[offset] = "délai dépassé (le service de reconnaissance ne répond pas)"
+                else:
+                    failed[offset] = f"{type(e).__name__}: {e}"
+                cooldown_until = max(cooldown_until, loop.time() + opts.cooldown)
+                return Hit(offset, None)
+
     async def one(offset: float) -> None:
         nonlocal done
-        if offset in cached:
-            hit = cached[offset]
-        else:
-            async with sem:
-                try:
-                    wav = await asyncio.wait_for(extract_clip(src.path, offset, opts.clip), 60)
-                    hit = Hit(offset, await asyncio.wait_for(recognizer.recognize(wav), opts.window_timeout))
-                except Exception as e:  # une fenêtre en échec ne doit pas arrêter le scan
-                    failed[offset] = f"{type(e).__name__}: {e}"
-                    on_event("warning", {"message": f"Extrait à {fmt_time(offset)} : {failed[offset]}"})
-                    hit = Hit(offset, None)
+        hit = cached[offset] if offset in cached else await attempt(offset)
+        if offset in failed:
+            on_event("warning", {"message": f"Extrait à {fmt_time(offset)} : {failed[offset]}"})
         hits.append(hit)
         done += 1
         if done % 10 == 0:
@@ -110,6 +126,17 @@ async def recognize_windows(
         on_event("recognize", {"done": done, "total": len(offsets), "hit": hit})
 
     await asyncio.gather(*(one(o) for o in offsets))
+
+    # Deuxième passage sur les extraits en échec, après une pause, un par un.
+    if failed and any(h.match for h in hits):
+        on_event("retry", {"count": len(failed)})
+        await asyncio.sleep(opts.cooldown)
+        sem = asyncio.Semaphore(1)
+        retried = {o: await attempt(o) for o in list(failed)}
+        hits = [retried.get(h.offset, h) for h in hits]
+        for h in retried.values():
+            on_event("recognize", {"done": done, "total": len(offsets), "hit": h})
+
     hits.sort(key=lambda h: h.offset)
 
     # Échec total = problème de configuration : on l'affiche au lieu de « 0 morceau ».

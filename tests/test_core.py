@@ -236,7 +236,7 @@ class BrokenRecognizer:
 
 def test_all_windows_failing_is_reported_not_silent(mix_file, tmp_path):
     warnings = []
-    opts = ScanOptions(step=60, clip=10, check_platforms=False, cache_dir=tmp_path)
+    opts = ScanOptions(step=60, clip=10, check_platforms=False, cache_dir=tmp_path, cooldown=0.1)
     with pytest.raises(RuntimeError, match="CERTIFICATE_VERIFY_FAILED"):
         asyncio.run(scan(str(mix_file), opts, lambda s, d: s == "warning" and warnings.append(d),
                          recognizer=BrokenRecognizer()))
@@ -290,7 +290,7 @@ class HangingRecognizer:
 
 def test_hanging_requests_do_not_freeze_the_scan(mix_file, tmp_path):
     warnings = []
-    opts = ScanOptions(step=20, clip=10, check_platforms=False, cache_dir=tmp_path, window_timeout=0.5)
+    opts = ScanOptions(step=20, clip=10, check_platforms=False, cache_dir=tmp_path, window_timeout=0.5, cooldown=0.1)
     res = asyncio.run(scan(str(mix_file), opts, lambda s, d: s == "warning" and warnings.append(d),
                            recognizer=HangingRecognizer()))
     assert res.recognized_windows > 0 and warnings  # résultats partiels gardés, échecs signalés
@@ -363,3 +363,27 @@ def test_spotify_403_gives_clear_message():
 
     with pytest.raises(RuntimeError, match="Web API"):
         asyncio.run(run())
+
+
+class FlakyRecognizer:
+    """Échoue au premier essai sur chaque extrait, réussit au second."""
+    name = "flaky"
+
+    def __init__(self):
+        self.seen = set()
+
+    async def recognize(self, wav: bytes):
+        key = hash(wav)
+        if key not in self.seen:
+            self.seen.add(key)
+            if len(self.seen) % 3 == 0:
+                raise TimeoutError()
+        return await FrequencyRecognizer().recognize(wav)
+
+
+def test_failed_windows_are_retried_in_a_second_pass(mix_file, tmp_path):
+    events = []
+    opts = ScanOptions(step=20, clip=10, check_platforms=False, cache_dir=tmp_path, cooldown=0.05)
+    res = asyncio.run(scan(str(mix_file), opts, lambda s, d: events.append(s), recognizer=FlakyRecognizer()))
+    assert "retry" in events
+    assert res.recognized_windows == res.windows  # tout récupéré au second passage

@@ -128,7 +128,7 @@ const PLATS = { spotify: "Spotify", soundcloud: "SoundCloud", deezer: "Deezer", 
   youtube: "YouTube", beatport: "Beatport", google: "Google" };
 const STAGES = { queued: "En attente…", download: "Téléchargement de l'audio", source: "Préparation",
   recognize: "Reconnaissance des morceaux", tracklist: "Construction de la tracklist",
-  platforms: "Vérification des plateformes" };
+  platforms: "Vérification des plateformes", retry: "Nouvel essai sur les extraits en échec" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let timer = null;
 
@@ -192,7 +192,8 @@ function render(job) {
   if (job.status === "running" || job.status === "queued")
     $("status").textContent = `${STAGES[job.stage] || job.stage}… ${pct} % · ${job.tracks.length} morceaux trouvés`;
   const w = job.warnings || [];
-  $("warn").textContent = w.length ? `⚠️ ${w.length} problème(s) — dernier : ${w[w.length - 1]}` : "";
+  const nw = job.warning_count || w.length;
+  $("warn").textContent = w.length ? `⚠️ ${nw} extrait(s) non analysé(s) (retentés automatiquement à la fin) — dernier : ${w[w.length - 1]}` : "";
   if (job.source) { $("head").hidden = false; $("mixtitle").textContent = job.source.title; }
   const ytid = job.source && job.source.url && job.source.url.includes("youtu") ? job.source.video_id : null;
   $("list").innerHTML = job.tracks.map((t) => trackHTML(t, ytid)).join("");

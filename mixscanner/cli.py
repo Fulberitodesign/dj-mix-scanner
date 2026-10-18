@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--step", type=float, default=30, help="Analyser un extrait toutes les N secondes (défaut 30)")
     ap.add_argument("--clip", type=float, default=12, help="Durée de chaque extrait en secondes (défaut 12)")
     ap.add_argument("--recognizer", default="shazam", choices=["shazam", "acrcloud", "audd"])
-    ap.add_argument("--concurrency", type=int, default=4)
+    ap.add_argument("--concurrency", type=int, default=2)
     ap.add_argument("--min-hits", type=int, default=1, help="Détections minimum pour garder un morceau")
     ap.add_argument("--start", type=float, default=0, help="Commencer à N secondes")
     ap.add_argument("--end", type=float, default=None, help="S'arrêter à N secondes")
