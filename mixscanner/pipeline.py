@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .audio import MixSource, default_cache_dir, extract_clip, load_source
-from .models import Hit, Match, Track
+from .models import Hit, Match, Track, fmt_time
 from .platforms import PlatformChecker
 from .recognizers import Recognizer, get_recognizer
 from .tracklist import build_tracklist, merge_with_description, parse_description
@@ -56,7 +56,7 @@ def _noop(stage: str, data: dict[str, Any]) -> None:
 def _hits_cache(opts: ScanOptions, src: MixSource) -> Path | None:
     if not src.video_id:
         return None
-    return opts.cache_dir / f"hits-{opts.recognizer}-{src.video_id}-{opts.step:g}-{opts.clip:g}.json"
+    return opts.cache_dir / f"hits-v2-{opts.recognizer}-{src.video_id}-{opts.step:g}-{opts.clip:g}.json"
 
 
 async def recognize_windows(
@@ -76,6 +76,7 @@ async def recognize_windows(
             cached[raw["offset"]] = Hit(raw["offset"], Match(**raw["match"]) if raw["match"] else None)
 
     hits: list[Hit] = []
+    failed: dict[float, str] = {}
     sem = asyncio.Semaphore(opts.concurrency)
     done = 0
 
@@ -89,7 +90,8 @@ async def recognize_windows(
                     wav = await extract_clip(src.path, offset, opts.clip)
                     hit = Hit(offset, await recognizer.recognize(wav))
                 except Exception as e:  # une fenêtre en échec ne doit pas arrêter le scan
-                    on_event("warning", {"message": f"Fenêtre {offset:.0f}s : {e}"})
+                    failed[offset] = f"{type(e).__name__}: {e}"
+                    on_event("warning", {"message": f"Extrait à {fmt_time(offset)} : {failed[offset]}"})
                     hit = Hit(offset, None)
         hits.append(hit)
         done += 1
@@ -98,10 +100,16 @@ async def recognize_windows(
     await asyncio.gather(*(one(o) for o in offsets))
     hits.sort(key=lambda h: h.offset)
 
-    if cache:
+    if failed and len(failed) >= len(hits) / 2:
+        raise RuntimeError(
+            f"La reconnaissance a échoué pour {len(failed)} extraits sur {len(hits)}. "
+            f"Première erreur : {next(iter(failed.values()))}"
+        )
+
+    if cache:  # les extraits en échec ne sont pas mis en cache : ils seront retentés
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps([{"offset": h.offset, "match": asdict(h.match) if h.match else None}
-                                     for h in hits]))
+                                     for h in hits if h.offset not in failed]))
     return hits
 
 

@@ -225,3 +225,25 @@ def test_end_to_end(mix_file, tmp_path):
     for fmt, fn in EXPORTERS.items():
         assert "Track C" in fn(res)
     assert json.loads(EXPORTERS["json"](res))["stats"]["tracks"] == 3
+
+
+class BrokenRecognizer:
+    name = "broken"
+
+    async def recognize(self, wav: bytes):
+        raise ConnectionError("SSL: CERTIFICATE_VERIFY_FAILED")
+
+
+def test_all_windows_failing_is_reported_not_silent(mix_file, tmp_path):
+    warnings = []
+    opts = ScanOptions(step=60, clip=10, check_platforms=False, cache_dir=tmp_path)
+    with pytest.raises(RuntimeError, match="CERTIFICATE_VERIFY_FAILED"):
+        asyncio.run(scan(str(mix_file), opts, lambda s, d: s == "warning" and warnings.append(d),
+                         recognizer=BrokenRecognizer()))
+    assert len(warnings) == 5
+
+
+def test_certifi_bundle_is_configured():
+    import os
+    import mixscanner  # noqa: F401
+    assert os.environ.get("SSL_CERT_FILE")
