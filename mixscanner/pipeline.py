@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .audio import MixSource, default_cache_dir, extract_clip, load_source
+from .audio import SAMPLE_RATE, MixSource, default_cache_dir, extract_clip, load_source
 from .models import Hit, Match, Track, fmt_time
 from .platforms import PlatformChecker
 from .recognizers import Recognizer, get_recognizer
@@ -28,6 +28,7 @@ class ScanOptions:
     end: float | None = None
     check_platforms: bool = True
     use_description: bool = True
+    cookies_from_browser: str | None = None  # chrome | safari | firefox… (si YouTube bloque)
     cache_dir: Path = field(default_factory=default_cache_dir)
 
 
@@ -48,6 +49,8 @@ class ScanResult:
         }
 
 
+MIN_CLIP_BYTES = 44 + SAMPLE_RATE * 2 * 2  # en-tête WAV + 2 s d'audio
+
 Event = Callable[[str, dict[str, Any]], None]
 
 
@@ -56,9 +59,29 @@ def _noop(stage: str, data: dict[str, Any]) -> None:
 
 
 def _hits_cache(opts: ScanOptions, src: MixSource) -> Path | None:
+    key = src.cache_id or src.video_id
+    if not key:
+        return None
+    return opts.cache_dir / f"hits-v3-{opts.recognizer}-{key}-{opts.step:g}-{opts.clip:g}.json"
+
+
+def _legacy_hits_cache(opts: ScanOptions, src: MixSource) -> Path | None:
+    """Nom utilisé par les versions précédentes : permet de reprendre un scan déjà commencé."""
     if not src.video_id:
         return None
     return opts.cache_dir / f"hits-v2-{opts.recognizer}-{src.video_id}-{opts.step:g}-{opts.clip:g}.json"
+
+
+def _load_cache(*paths: Path | None) -> dict[float, Hit]:
+    for path in paths:
+        if not path or not path.exists():
+            continue
+        try:
+            return {raw["offset"]: Hit(raw["offset"], Match(**raw["match"]) if raw["match"] else None)
+                    for raw in json.loads(path.read_text())}
+        except (ValueError, KeyError, TypeError):
+            continue  # cache illisible (interruption pendant l'écriture…) : on l'ignore
+    return {}
 
 
 async def recognize_windows(
@@ -71,11 +94,8 @@ async def recognize_windows(
         offsets.append(t)
         t += opts.step
 
-    cached: dict[float, Hit] = {}
     cache = _hits_cache(opts, src)
-    if cache and cache.exists():
-        for raw in json.loads(cache.read_text()):
-            cached[raw["offset"]] = Hit(raw["offset"], Match(**raw["match"]) if raw["match"] else None)
+    cached = _load_cache(cache, _legacy_hits_cache(opts, src))
 
     hits: list[Hit] = []
     failed: dict[float, str] = {}
@@ -87,9 +107,15 @@ async def recognize_windows(
         # Les extraits en échec ne sont pas mis en cache : ils seront retentés.
         if not cache:
             return
+        # On garde aussi les extraits d'analyses précédentes hors de la plage actuelle (--start/--end).
+        keep = {o: h for o, h in cached.items() if o not in failed}
+        keep.update({h.offset: h for h in hits if h.offset not in failed})
+        data = json.dumps([{"offset": h.offset, "match": asdict(h.match) if h.match else None}
+                           for h in sorted(keep.values(), key=lambda h: h.offset)])
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps([{"offset": h.offset, "match": asdict(h.match) if h.match else None}
-                                     for h in hits if h.offset not in failed]))
+        tmp = cache.with_suffix(".tmp")
+        tmp.write_text(data)
+        tmp.replace(cache)  # écriture atomique : pas de cache à moitié écrit si on coupe
 
     loop = asyncio.get_running_loop()
     cooldown_until = 0.0
@@ -103,7 +129,10 @@ async def recognize_windows(
                 await asyncio.sleep(wait)
             try:
                 wav = await asyncio.wait_for(extract_clip(src.path, offset, opts.clip), 60)
-                hit = Hit(offset, await asyncio.wait_for(recognizer.recognize(wav), opts.window_timeout))
+                if len(wav) < MIN_CLIP_BYTES:  # fin du fichier : rien à reconnaître
+                    hit = Hit(offset, None)
+                else:
+                    hit = Hit(offset, await asyncio.wait_for(recognizer.recognize(wav), opts.window_timeout))
                 failed.pop(offset, None)
                 return hit
             except Exception as e:  # une fenêtre en échec ne doit pas arrêter le scan
@@ -151,6 +180,15 @@ async def recognize_windows(
     return hits
 
 
+async def _close(obj: Any) -> None:
+    close = getattr(obj, "aclose", None)
+    if close:
+        try:
+            await close()
+        except Exception:
+            pass
+
+
 async def scan(
     url: str,
     opts: ScanOptions | None = None,
@@ -162,23 +200,32 @@ async def scan(
 
     on_event("download", {"progress": 0.0})
     src = await asyncio.to_thread(
-        load_source, url, opts.cache_dir, lambda p: on_event("download", {"progress": p})
+        load_source, url, opts.cache_dir, lambda p: on_event("download", {"progress": p}),
+        opts.cookies_from_browser,
     )
     source_info = {"title": src.title, "url": src.url or url, "duration": src.duration,
                    "uploader": src.uploader, "video_id": src.video_id}
     on_event("source", source_info)
 
+    own_recognizer = recognizer is None
     recognizer = recognizer or get_recognizer(opts.recognizer)
-
-    hits = await recognize_windows(src, opts, recognizer, on_event)
+    try:
+        hits = await recognize_windows(src, opts, recognizer, on_event)
+    finally:
+        if own_recognizer:
+            await _close(recognizer)
     tracks = build_tracklist(hits, opts.clip, src.duration, opts.max_gap, opts.min_hits)
 
     entries = parse_description(src.description, src.chapters) if opts.use_description else []
+    # Seules les entrées situées dans la partie analysée comptent (--start / --end).
+    end = min(opts.end or src.duration, src.duration)
+    entries = [e for e in entries if opts.start - 5 <= e.start < end]
     if entries:
         tracks = merge_with_description(tracks, entries)
     on_event("tracklist", {"tracks": tracks})
 
     if opts.check_platforms and tracks:
+        own_checker = checker is None
         checker = checker or PlatformChecker()
         sem = asyncio.Semaphore(3)
         done = 0
@@ -190,7 +237,11 @@ async def scan(
             done += 1
             on_event("platforms", {"done": done, "total": len(tracks), "track": t})
 
-        await asyncio.gather(*(check(t) for t in tracks))
+        try:
+            await asyncio.gather(*(check(t) for t in tracks))
+        finally:
+            if own_checker:
+                await checker.aclose()
 
     return ScanResult(
         source=source_info, tracks=tracks, windows=len(hits),

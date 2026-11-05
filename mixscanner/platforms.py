@@ -12,20 +12,40 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
+import re
 import time
-from urllib.parse import quote_plus
+from typing import Any
+from urllib.parse import parse_qs, quote_plus, urlencode, urlsplit
 
 import httpx
 
-from .classify import same_version
+from .classify import core_title, same_version
 from .models import PlatformResult, Track, normalize
+from .throttle import Throttle
 from .tracklist import similarity
 
 MATCH_THRESHOLD = 0.72
+CHECK_TIMEOUT = 90.0  # par plateforme et par morceau, relances comprises
 
 
 def _query(t: Track) -> str:
     return f"{t.artist} {t.title}".strip()
+
+
+def _main_artist(artist: str) -> str:
+    return re.split(r"\s*(?:,|&|\bfeat\.?|\bft\.?|\bfeaturing\b|\bx\b|\bvs\.?|\band\b)\s*", artist or "", maxsplit=1,
+                    flags=re.I)[0].strip()
+
+
+def _queries(t: Track) -> list[str]:
+    """Recherche complète, puis simplifiée (artiste principal + titre sans « feat. » ni crochets) :
+    les moteurs de recherche des plateformes échouent souvent sur les titres à rallonge."""
+    title = re.sub(r"[\[(]\s*(?:feat|ft|featuring)\.?\s[^\])]*[\])]", "", t.title or "", flags=re.I).strip()
+    out = [_query(t), f"{_main_artist(t.artist)} {title}".strip(), f"{_main_artist(t.artist)} {core_title(t.title)}".strip()]
+    return list(dict.fromkeys(q for q in out if q))
+
+
+_Throttle = Throttle  # ancien nom, gardé pour compatibilité
 
 
 def search_urls(t: Track) -> dict[str, str]:
@@ -39,6 +59,13 @@ def search_urls(t: Track) -> dict[str, str]:
         "beatport": f"https://www.beatport.com/search?q={q}",
         "google": f"https://www.google.com/search?q={q}",
     }
+
+
+def _clean_apple_url(url: str) -> str:
+    """Retire les paramètres de suivi (mttnagencyid…) en gardant l'identifiant du morceau (?i=)."""
+    parts = urlsplit(url)
+    keep = {k: v[0] for k, v in parse_qs(parts.query).items() if k == "i"}
+    return parts._replace(query=urlencode(keep)).geturl()
 
 
 def _best(track: Track, candidates: list[tuple[str, str, str]]) -> tuple[str, str, float] | None:
@@ -65,11 +92,41 @@ def _result(platform: str, track: Track, found, search_url: str) -> PlatformResu
 
 
 class PlatformChecker:
-    def __init__(self, client: httpx.AsyncClient | None = None, youtube: bool = True) -> None:
+    def __init__(self, client: httpx.AsyncClient | None = None, youtube: bool = True,
+                 itunes_interval: float = 3.0, deezer_interval: float = 0.15) -> None:
+        self._own_client = client is None
         self.client = client or httpx.AsyncClient(timeout=20, follow_redirects=True)
         self.youtube = youtube
         self._spotify_token: tuple[str, float] | None = None
         self.sc_client_id = os.environ.get("SOUNDCLOUD_CLIENT_ID")
+        self._itunes = _Throttle(itunes_interval)
+        self._deezer = _Throttle(deezer_interval)
+        self._itunes_failures = 0  # échecs consécutifs : au-delà de 3, iTunes est considéré bloqué
+
+    async def aclose(self) -> None:
+        if self._own_client:
+            await self.client.aclose()
+
+    async def _get_json(self, url: str, params: dict | None = None, throttle: _Throttle | None = None,
+                        attempts: int = 3, **kw: Any) -> Any:
+        """GET JSON avec relances quand le service limite le débit (429, 403 d'iTunes, quota Deezer)."""
+        for i in range(attempts):
+            if throttle:
+                await throttle.wait()
+            r = await self.client.get(url, params=params, **kw)
+            limited = r.status_code == 429 or (r.status_code == 403 and "itunes.apple.com" in url)
+            if not limited and r.status_code < 400:
+                j = r.json()
+                # Deezer répond 200 avec {"error": {"code": 4}} quand le quota est dépassé.
+                if isinstance(j, dict) and (j.get("error") or {}).get("code") == 4:
+                    limited = True
+                else:
+                    return j
+            if not limited or i == attempts - 1:
+                r.raise_for_status()
+                raise httpx.HTTPStatusError(f"Limite de débit atteinte ({url})", request=r.request, response=r)
+            retry_after = r.headers.get("retry-after", "")
+            await asyncio.sleep(float(retry_after) if retry_after.isdigit() else 5 * 2**i)
 
     # --- Spotify (clé gratuite : https://developer.spotify.com/dashboard) ---
     async def _spotify_auth(self) -> str | None:
@@ -97,12 +154,11 @@ class PlatformChecker:
             return PlatformResult("spotify", "unverified", search_url=surl,
                                   note="Ajoutez SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET pour vérifier")
         headers = {"Authorization": f"Bearer {token}"}
-        queries = ([f"isrc:{t.isrc}"] if t.isrc else []) + [f'track:"{t.title}" artist:"{t.artist}"', _query(t)]
+        queries = ([f"isrc:{t.isrc}"] if t.isrc else []) + [f'track:"{t.title}" artist:"{t.artist}"', *_queries(t)]
         for q in queries:
-            r = await self.client.get("https://api.spotify.com/v1/search", headers=headers,
-                                      params={"q": q, "type": "track", "limit": 10})
-            r.raise_for_status()
-            items = r.json().get("tracks", {}).get("items", [])
+            j = await self._get_json("https://api.spotify.com/v1/search", headers=headers,
+                                     params={"q": q, "type": "track", "limit": 10})
+            items = (j.get("tracks") or {}).get("items", [])
             cands = [(", ".join(a["name"] for a in it["artists"]), it["name"], it["external_urls"]["spotify"])
                      for it in items]
             found = _best(t, cands)
@@ -114,29 +170,45 @@ class PlatformChecker:
     async def deezer(self, t: Track) -> PlatformResult:
         surl = search_urls(t)["deezer"]
         if t.isrc:
-            r = await self.client.get(f"https://api.deezer.com/2.0/track/isrc:{t.isrc}")
-            j = r.json()
-            if r.status_code == 200 and j.get("id"):
-                return _result("deezer", t, (f"{j['artist']['name']} - {j['title']}", j["link"], 1.0), surl)
-        r = await self.client.get("https://api.deezer.com/search",
-                                  params={"q": f'artist:"{t.artist}" track:"{t.title}"' if t.artist else t.title})
-        r.raise_for_status()
-        items = r.json().get("data", [])
-        if not items:
-            r = await self.client.get("https://api.deezer.com/search", params={"q": _query(t)})
-            items = r.json().get("data", [])
-        cands = [(it["artist"]["name"], it["title"], it["link"]) for it in items]
-        return _result("deezer", t, _best(t, cands), surl)
+            j = await self._get_json(f"https://api.deezer.com/2.0/track/isrc:{t.isrc}", throttle=self._deezer)
+            if j.get("id"):
+                res = _result("deezer", t, (f"{j['artist']['name']} - {j['title']}", j["link"], 1.0), surl)
+                res.isrc = j.get("isrc") or t.isrc
+                return res
+        queries = [f'artist:"{t.artist}" track:"{t.title}"' if t.artist else t.title, *_queries(t)]
+        for q in queries:
+            j = await self._get_json("https://api.deezer.com/search", params={"q": q}, throttle=self._deezer)
+            items = j.get("data", [])
+            found = _best(t, [(it["artist"]["name"], it["title"], it["link"]) for it in items])
+            if found:
+                res = _result("deezer", t, found, surl)
+                res.isrc = next((it.get("isrc") for it in items if it["link"] == found[1]), None)
+                return res
+        return PlatformResult("deezer", "not_found", search_url=surl)
 
     # --- Apple Music / iTunes (API publique, sans clé) ---
     async def apple_music(self, t: Track) -> PlatformResult:
         surl = search_urls(t)["apple_music"]
-        r = await self.client.get("https://itunes.apple.com/search",
-                                  params={"term": _query(t), "entity": "song", "limit": 10})
-        r.raise_for_status()
-        cands = [(it.get("artistName", ""), it.get("trackName", ""), it.get("trackViewUrl", ""))
-                 for it in r.json().get("results", [])]
-        return _result("apple_music", t, _best(t, cands), surl)
+        if t.links.get("apple_music"):  # lien exact fourni par Shazam / AudD : inutile de chercher
+            return PlatformResult("apple_music", "available", url=_clean_apple_url(t.links["apple_music"]),
+                                  search_url=surl, matched_title=f"{t.artist} - {t.title}", same_version=True)
+        if self._itunes_failures >= 3:
+            return PlatformResult("apple_music", "error", search_url=surl,
+                                  note="Apple Music limite les requêtes depuis votre connexion : réessayez plus tard")
+        for q in _queries(t)[:2]:
+            try:
+                j = await self._get_json("https://itunes.apple.com/search", throttle=self._itunes,
+                                         params={"term": q, "entity": "song", "limit": 10})
+                self._itunes_failures = 0
+            except httpx.HTTPError:
+                self._itunes_failures += 1
+                raise
+            cands = [(it.get("artistName", ""), it.get("trackName", ""), it.get("trackViewUrl", ""))
+                     for it in j.get("results", [])]
+            found = _best(t, cands)
+            if found:
+                return _result("apple_music", t, found, surl)
+        return PlatformResult("apple_music", "not_found", search_url=surl)
 
     # --- SoundCloud (beaucoup de remix / mashups / bootlegs n'existent que là) ---
     async def soundcloud(self, t: Track) -> PlatformResult:
@@ -144,11 +216,10 @@ class PlatformChecker:
         if not self.sc_client_id:
             return PlatformResult("soundcloud", "unverified", search_url=surl,
                                   note="Ajoutez SOUNDCLOUD_CLIENT_ID pour vérifier automatiquement")
-        r = await self.client.get("https://api-v2.soundcloud.com/search/tracks",
-                                  params={"q": _query(t), "client_id": self.sc_client_id, "limit": 10})
-        r.raise_for_status()
+        j = await self._get_json("https://api-v2.soundcloud.com/search/tracks",
+                                 params={"q": _query(t), "client_id": self.sc_client_id, "limit": 10})
         cands = [((it.get("publisher_metadata") or {}).get("artist") or (it.get("user") or {}).get("username", ""),
-                  it.get("title", ""), it.get("permalink_url", "")) for it in r.json().get("collection", [])]
+                  it.get("title", ""), it.get("permalink_url", "")) for it in j.get("collection", [])]
         return _result("soundcloud", t, _best(t, cands), surl)
 
     # --- YouTube (recherche via yt-dlp, sans clé) ---
@@ -165,7 +236,7 @@ class PlatformChecker:
             with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 15}) as ydl:
                 return ydl.extract_info(f"ytsearch5:{_query(t)}", download=False).get("entries", [])
 
-        entries = await asyncio.to_thread(run)
+        entries = [e for e in (await asyncio.to_thread(run) or []) if e]
         cands = [("", e.get("title", ""), e.get("url") or f"https://www.youtube.com/watch?v={e.get('id')}")
                  for e in entries]
         return _result("youtube", t, _best(t, cands), surl)
@@ -177,12 +248,14 @@ class PlatformChecker:
             "spotify": self.spotify, "soundcloud": self.soundcloud, "deezer": self.deezer,
             "apple_music": self.apple_music, "youtube": self.youtube_search,
         }
-        results = await asyncio.gather(*(asyncio.wait_for(fn(t), 45) for fn in checks.values()),
+        results = await asyncio.gather(*(asyncio.wait_for(fn(t), CHECK_TIMEOUT) for fn in checks.values()),
                                        return_exceptions=True)
         surls = search_urls(t)
         out: list[PlatformResult] = []
         for name, res in zip(checks, results):
-            if isinstance(res, Exception):
+            if isinstance(res, asyncio.TimeoutError):
+                res = PlatformResult(name, "error", search_url=surls[name], note="La plateforme ne répond pas")
+            elif isinstance(res, Exception):
                 res = PlatformResult(name, "error", search_url=surls[name], note=f"{type(res).__name__}: {res}"[:200])
             out.append(res)
         out.append(PlatformResult("beatport", "unverified", search_url=surls["beatport"]))

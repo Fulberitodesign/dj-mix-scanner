@@ -35,7 +35,12 @@ fi
 source .venv/bin/activate
 pip install -q --upgrade pip >/dev/null
 pip install -q -r requirements.txt || pause_exit
-pip install -q -U yt-dlp >/dev/null
+# yt-dlp doit rester à jour (YouTube change souvent) ; Deno lui sert à déchiffrer les vidéos YouTube.
+# Deno n'existe pas pour les très anciens macOS : on continue sans lui dans ce cas.
+if ! pip install -q -U "yt-dlp[default,deno]" >/dev/null 2>&1; then
+  pip install -q -U "yt-dlp[default]" >/dev/null 2>&1
+  echo "ℹ︎ Deno indisponible sur ce Mac : certaines vidéos YouTube peuvent ne pas se télécharger."
+fi
 echo "✔ Outil prêt"
 
 (sleep 3; open "http://127.0.0.1:8000") &

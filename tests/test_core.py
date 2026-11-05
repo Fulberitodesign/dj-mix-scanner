@@ -31,11 +31,20 @@ from mixscanner.tracklist import build_tracklist, merge_with_description, parse_
     ("Blue Monday (Joe Goddard Re-Edit)", "New Order", "edit", "Joe Goddard"),
     ("Wake Me Up (Radio Edit)", "Avicii", "original", None),
     ("Opus (Extended Mix)", "Eric Prydz", "extended", None),
+    ("EoO (Afro House Remix)", "CYCLOPE", "remix", None),
+    ("NEL (JPTheDJ Tech House Remix)", "Fuerza Regida", "remix", "JPTheDJ"),
+    ("Who's That Girl vs. SECRETO VICTORIA (Lara Mashup 2024)", "Afterman", "mashup", "Lara"),
+    ("Spark (Hardwell Remix)", "X", "remix", "Hardwell"),
 ])
 def test_classify(title, artist, kind, remixer):
     v = classify(title, artist)
     assert v.kind == kind
     assert v.remixer == remixer
+
+
+def test_generic_label_is_not_repeated():
+    assert classify("Medusa (Remix)").label == ""
+    assert classify("EoO (Afro House Remix)").label == "Afro House Remix"
 
 
 def test_same_version():
@@ -389,76 +398,276 @@ def test_failed_windows_are_retried_in_a_second_pass(mix_file, tmp_path):
     assert res.recognized_windows == res.windows  # tout récupéré au second passage
 
 
-def test_odesli_resolves_spotify_links_in_mix_order():
-    from mixscanner.models import PlatformResult
-    from mixscanner.odesli import resolve_spotify_links
+# --- liens Spotify (MusicBrainz, API Spotify, song.link avec clé) -------------------------
 
+def _links_client(handler):
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def _fast_mb(client):
+    from mixscanner.spotify_links import MusicBrainz
+    return MusicBrainz(client, interval=0)
+
+
+def test_spotify_links_in_mix_order(monkeypatch):
+    from mixscanner.models import PlatformResult
+    from mixscanner.spotify_links import resolve_spotify_links
+
+    for var in ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "ODESLI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
     asked = []
 
     def handler(req: httpx.Request) -> httpx.Response:
-        if req.url.host != "api.song.link":  # recherches Deezer / Apple : rien trouvé
-            return httpx.Response(200, json={"data": [], "results": []})
-        src = req.url.params["url"]
-        asked.append(src)
-        if src == "https://www.deezer.com/track/1":
-            return httpx.Response(200, json={"linksByPlatform": {"spotify": {"url": "https://open.spotify.com/track/A"}}})
-        if src == "https://music.apple.com/x":
-            return httpx.Response(200, json={"linksByPlatform": {"spotify": {"url": "https://open.spotify.com/track/B"}}})
-        return httpx.Response(200, json={"linksByPlatform": {}})
+        assert req.url.host != "api.song.link"  # sans clé, song.link n'est jamais appelé
+        if req.url.host == "musicbrainz.org":
+            assert req.headers["User-Agent"].startswith("MixScanner/")
+            asked.append(req.url.path)
+            if req.url.path == "/ws/2/isrc/GBAAA0000001":
+                return httpx.Response(200, json={"recordings": [{"relations": [
+                    {"url": {"resource": "https://open.spotify.com/track/B"}}]}]})
+            if req.url.path == "/ws/2/recording":
+                return httpx.Response(200, json={"recordings": []})
+            return httpx.Response(404)
+        if req.url.host == "api.deezer.com":
+            if "Rare" in str(req.url):
+                return httpx.Response(200, json={"data": [{"title": "Rare Dub", "link": "https://www.deezer.com/track/7",
+                                                           "artist": {"name": "Nobody"}, "isrc": "FRXXX0000009"}]})
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(404)
 
     tracks = [
-        _t("Glue", "Bicep", availability=[PlatformResult("deezer", "available", url="https://www.deezer.com/track/1")]),
-        _t("Opus", "Eric Prydz", links={"apple_music": "https://music.apple.com/x"}),
-        _t("ID", "ID"),
-        _t("Rare Dub", "Nobody", availability=[PlatformResult("youtube", "available", url="https://youtu.be/z")]),
-        _t("No Source", "Nobody"),
         _t("Glue", "Bicep", availability=[PlatformResult("spotify", "available", url="https://open.spotify.com/track/A")]),
+        _t("Opus", "Eric Prydz", isrc="GBAAA0000001"),
+        _t("ID", "ID"),
+        _t("Rare Dub", "Nobody"),
+        _t("Glue", "Bicep", links={"spotify": "https://open.spotify.com/track/A"}),
     ]
     progress = []
 
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
-            return await resolve_spotify_links(tracks, c, lambda d, t: progress.append((d, t)), delay=0)
+        async with _links_client(handler) as c:
+            return await resolve_spotify_links(tracks, c, lambda d, t: progress.append((d, t)), musicbrainz=_fast_mb(c))
 
     links, missing, diag = asyncio.run(run())
     assert links == ["https://open.spotify.com/track/A", "https://open.spotify.com/track/B"]
-    assert [t.title for t in missing] == ["Rare Dub", "No Source"]
-    assert asked == ["https://www.deezer.com/track/1", "https://music.apple.com/x", "https://youtu.be/z"]
-    assert diag["not_on_spotify"] == 1 and diag["no_source"] == 1
+    assert [t.title for t in missing] == ["Rare Dub"]
+    assert "/ws/2/isrc/FRXXX0000009" in asked  # ISRC trouvé sur Deezer puis cherché sur MusicBrainz
+    assert diag["found_by"] == {"déjà connu": 2, "MusicBrainz": 1} and diag["not_found"] == 1
     assert tracks[1].availability[0].platform == "spotify" and tracks[1].availability[0].status == "available"
-    assert progress[-1] == (5, 5)
+    assert progress[-1] == (4, 4)
 
 
+def test_spotify_links_musicbrainz_search_by_title(monkeypatch):
+    from mixscanner.spotify_links import resolve_spotify_links
 
-def test_odesli_searches_deezer_when_track_has_no_link():
-    from mixscanner.odesli import resolve_spotify_links
+    for var in ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "ODESLI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
 
     def handler(req: httpx.Request) -> httpx.Response:
-        if req.url.host == "api.deezer.com":
-            return httpx.Response(200, json={"data": [
-                {"title": "Umbrella", "link": "https://www.deezer.com/track/9", "artist": {"name": "Rihanna"}}]})
-        if req.url.host == "api.song.link":
-            assert req.url.params["url"] == "https://www.deezer.com/track/9"
-            return httpx.Response(200, json={"linksByPlatform": {"spotify": {"url": "https://open.spotify.com/track/U"}}})
-        return httpx.Response(200, json={"results": []})
+        if req.url.host == "musicbrainz.org":
+            if req.url.path == "/ws/2/recording":
+                assert 'recording:"Umbrella (feat. JAY-Z)"' in req.url.params["query"]
+                return httpx.Response(200, json={"recordings": [
+                    {"id": "r1", "title": "Umbrella", "artist-credit": [{"name": "Rihanna", "joinphrase": ""}]}]})
+            if req.url.path == "/ws/2/recording/r1":
+                return httpx.Response(200, json={"relations": [
+                    {"url": {"resource": "https://open.spotify.com/track/U"}}]})
+        return httpx.Response(200, json={"data": []})
 
     async def run():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
-            return await resolve_spotify_links([_t("Umbrella (feat. JAY-Z)", "Rihanna")], c, delay=0)
+        async with _links_client(handler) as c:
+            return await resolve_spotify_links([_t("Umbrella (feat. JAY-Z)", "Rihanna")], c, musicbrainz=_fast_mb(c))
 
     links, missing, diag = asyncio.run(run())
     assert links == ["https://open.spotify.com/track/U"] and missing == []
 
 
-def test_odesli_errors_are_reported():
+def test_spotify_links_odesli_key_refused_is_reported_once(monkeypatch):
     from mixscanner.models import PlatformResult
-    from mixscanner.odesli import resolve_spotify_links
+    from mixscanner.spotify_links import resolve_spotify_links
+
+    monkeypatch.setenv("ODESLI_API_KEY", "k")
+    for var in ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"):
+        monkeypatch.delenv(var, raising=False)
+    odesli_calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.host == "api.song.link":
+            odesli_calls.append(req.url.params["key"])
+            return httpx.Response(401, json={"code": "PUBLIC_API_ACCESS_DEPRECATED"})
+        if req.url.host == "musicbrainz.org":
+            return httpx.Response(200, json={"recordings": []})
+        return httpx.Response(200, json={"data": []})
+
+    tracks = [_t(n, "X", availability=[PlatformResult("deezer", "available", url=f"https://www.deezer.com/track/{n}")])
+              for n in ("One", "Two", "Three")]
 
     async def run():
-        transport = httpx.MockTransport(lambda req: httpx.Response(500, text="boom"))
-        async with httpx.AsyncClient(transport=transport) as c:
-            t = _t("Glue", "Bicep", availability=[PlatformResult("deezer", "available", url="https://www.deezer.com/track/1")])
-            return await resolve_spotify_links([t], c, delay=0)
+        async with _links_client(handler) as c:
+            return await resolve_spotify_links(tracks, c, musicbrainz=_fast_mb(c))
 
     links, missing, diag = asyncio.run(run())
-    assert links == [] and diag["errors"] == 1 and "500" in diag["first_error"]
+    assert links == [] and len(missing) == 3
+    assert odesli_calls == ["k"]  # clé refusée : pas de nouvel essai pour les morceaux suivants
+    assert diag["errors"] == 1 and "ODESLI_API_KEY" in diag["first_error"]
+
+
+def test_spotify_links_errors_are_reported(monkeypatch):
+    from mixscanner.spotify_links import resolve_spotify_links
+
+    for var in ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "ODESLI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+    async def run():
+        async with _links_client(lambda req: httpx.Response(500, text="boom")) as c:
+            return await resolve_spotify_links([_t("Glue", "Bicep", isrc="GB0000000001")], c, musicbrainz=_fast_mb(c))
+
+    links, missing, diag = asyncio.run(run())
+    assert links == [] and diag["errors"] >= 1 and "500" in diag["first_error"]
+
+
+# --- corrections : description, mashups, cache, limites de débit… ---------------------
+
+def test_extracted_clip_is_a_valid_wav(mix_file):
+    from mixscanner.audio import extract_clip
+    wav = asyncio.run(extract_clip(mix_file, 5, 10))
+    assert int.from_bytes(wav[4:8], "little") == len(wav) - 8  # taille RIFF exacte (pas 0xFFFFFFFF)
+    with wave.open(io.BytesIO(wav)) as w:
+        assert w.getframerate() == 16000 and w.getnchannels() == 1
+        assert abs(w.getnframes() / 16000 - 10) < 0.1
+
+
+def test_description_numbering_after_timestamp_is_removed():
+    desc = "Tracklist:\n[00:00] 01. Bad Bunny - EoO (Bante Edit)\n[01:18] 02. Bante - Voy x3\n3:35 10) Foo - Bar"
+    entries = parse_description(desc)
+    assert [(e.start, e.artist, e.title) for e in entries] == [
+        (0, "Bad Bunny", "EoO (Bante Edit)"), (78, "Bante", "Voy x3"), (215, "Foo", "Bar")]
+
+
+def test_mashup_from_description_absorbs_its_parts():
+    from mixscanner.tracklist import DescEntry
+    tracks = build_tracklist([Hit(60, m("Who's da Gurl", "Disco Gurls")), Hit(90, m("SECRETO VICTORIA", "Fuerza Regida")),
+                              Hit(120, m("SECRETO VICTORIA", "Fuerza Regida")), Hit(300, m("Voy", "Bante"))], 12, 400)
+    entries = [DescEntry(78, "Afterman vs. Fuerza Regida", "Who's That Girl vs. SECRETO VICTORIA (Lara Mashup 2024)"),
+               DescEntry(215, "Bante", "Voy")]
+    out = merge_with_description(tracks, entries)
+    assert [(t.title, t.start, t.source) for t in out] == [
+        ("Who's That Girl vs. SECRETO VICTORIA (Lara Mashup 2024)", 60, "audio+description"),
+        ("Voy", 300, "audio+description")]
+    assert out[0].version.kind == "mashup" and out[0].hits == 3 and out[0].isrc is None
+    assert [t.index for t in out] == [1, 2]
+
+
+def test_build_tracklist_does_not_modify_hits():
+    a1 = Match(title="A", artist="X", provider="t")
+    a2 = Match(title="A", artist="X", provider="t", isrc="ISRC1", links={"deezer": "d"})
+    build_tracklist([Hit(0, a1), Hit(30, a2)], 12)
+    assert a1.isrc is None and a1.links == {}
+
+
+def test_description_entries_outside_analyzed_range_are_ignored(mix_file, tmp_path, monkeypatch):
+    from mixscanner import pipeline
+    from mixscanner.audio import MixSource
+
+    def fake_load(url, cache_dir, on_progress=None, cookies=None):
+        return MixSource(path=mix_file, title="Mix", duration=260, cache_id="t",
+                         description="00:00 Someone - First\n01:00 Someone - Second\n04:00 Someone - Late")
+    monkeypatch.setattr(pipeline, "load_source", fake_load)
+    opts = ScanOptions(step=20, clip=10, check_platforms=False, cache_dir=tmp_path, end=120)
+    res = asyncio.run(scan("x", opts, recognizer=FrequencyRecognizer()))
+    assert "Late" not in [t.title for t in res.tracks]
+    assert "Second" in [t.title for t in res.tracks]
+
+
+class CountingRecognizer(FrequencyRecognizer):
+    def __init__(self):
+        self.calls = 0
+
+    async def recognize(self, wav):
+        self.calls += 1
+        return await super().recognize(wav)
+
+
+def test_local_files_are_cached_and_cache_is_merged(mix_file, tmp_path):
+    first = CountingRecognizer()
+    asyncio.run(scan(str(mix_file), ScanOptions(step=20, clip=10, check_platforms=False, cache_dir=tmp_path, end=100),
+                     recognizer=first))
+    assert first.calls == 5
+    second = CountingRecognizer()
+    res = asyncio.run(scan(str(mix_file), ScanOptions(step=20, clip=10, check_platforms=False, cache_dir=tmp_path),
+                           recognizer=second))
+    assert second.calls == res.windows - 5  # seuls les nouveaux extraits sont analysés
+    third = CountingRecognizer()
+    asyncio.run(scan(str(mix_file), ScanOptions(step=20, clip=10, check_platforms=False, cache_dir=tmp_path, end=60),
+                     recognizer=third))
+    assert third.calls == 0
+
+
+def test_itunes_rate_limit_is_retried():
+    calls = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(req.url.host)
+        if len(calls) == 1:
+            return httpx.Response(403, text="rate limited")
+        return httpx.Response(200, json={"results": [
+            {"artistName": "Bicep", "trackName": "Glue", "trackViewUrl": "https://music.apple.com/glue"}]})
+
+    async def run():
+        checker = PlatformChecker(httpx.AsyncClient(transport=httpx.MockTransport(handler)), itunes_interval=0)
+        import mixscanner.platforms as pf
+        orig = pf.asyncio.sleep
+
+        async def fast_sleep(d):
+            await orig(0)
+        pf.asyncio.sleep = fast_sleep
+        try:
+            return await checker.apple_music(_t("Glue", "Bicep"))
+        finally:
+            pf.asyncio.sleep = orig
+
+    res = asyncio.run(run())
+    assert res.status == "available" and len(calls) == 2
+
+
+def test_recognizer_account_errors_are_raised():
+    with pytest.raises(RuntimeError, match="invalid access key"):
+        ACRCloudRecognizer.parse({"status": {"code": 3001, "msg": "invalid access key"}})
+    assert ACRCloudRecognizer.parse({"status": {"code": 1001, "msg": "No result"}}) is None
+    from mixscanner.recognizers import AuddRecognizer
+    with pytest.raises(RuntimeError, match="AudD"):
+        AuddRecognizer.parse({"status": "error", "error": {"error_code": 901, "error_message": "limit reached"}})
+
+
+def test_cli_rejects_bad_output_format_before_scanning(capsys):
+    from mixscanner.cli import main
+    with pytest.raises(SystemExit):
+        main(["https://example.com/mix", "-o", "out.xls"])
+    assert "Format non supporté" in capsys.readouterr().err
+
+
+def test_download_errors_are_explained():
+    from mixscanner.audio import explain_download_error
+    msg = explain_download_error("ERROR: [youtube] abc: Sign in to confirm you’re not a bot. Use --cookies")
+    assert "Cookies YouTube" in msg
+    assert "pas installé" in explain_download_error('ERROR: could not find chrome cookies database in "/x"')
+
+
+def test_web_validation_and_spotify_links_started_once(monkeypatch):
+    from fastapi.testclient import TestClient
+    from mixscanner import web
+
+    client = TestClient(web.app)
+    assert client.post("/api/scan", json={"url": "x", "recognizer": "nope"}).status_code == 422
+    assert client.post("/api/scan", json={"url": "x", "cookies_from_browser": "netscape"}).status_code == 422
+
+    started = []
+    monkeypatch.setattr(web.Job, "resolve_spotify_links", lambda self: started.append(1))
+    job = web.Job(web.ScanRequest(url="x"))
+    job.result = _result_with([_t("Glue", "Bicep")])
+    web.JOBS[job.id] = job
+    assert job.start_spotify_links() is True
+    assert client.post(f"/api/jobs/{job.id}/spotify-links").status_code == 200  # déjà en cours : rien relancé
+    import time
+    time.sleep(0.1)
+    assert len(started) == 1

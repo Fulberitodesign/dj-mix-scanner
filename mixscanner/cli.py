@@ -6,6 +6,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+from .audio import BROWSERS
 from .export import EXPORTERS, PLATFORM_NAMES, _platform_cell, _version
 from .models import fmt_time
 from .pipeline import ScanOptions, scan
@@ -27,6 +28,8 @@ def _progress(stage: str, data: dict) -> None:
         print(f"\r🌐 Plateformes {data['done']}/{data['total']}", end="", file=sys.stderr, flush=True)
     elif stage == "warning":
         print(f"\n⚠️  {data['message']}", file=sys.stderr)
+    elif stage == "retry":
+        print(f"\n🔁 Nouvel essai sur {data['count']} extrait(s) en échec…", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,13 +44,36 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--end", type=float, default=None, help="S'arrêter à N secondes")
     ap.add_argument("--no-platforms", action="store_true", help="Ne pas vérifier Spotify/SoundCloud/…")
     ap.add_argument("--no-description", action="store_true", help="Ignorer la tracklist de la description")
-    ap.add_argument("-o", "--output", type=Path, help="Fichier de sortie (.txt .csv .json .md)")
+    ap.add_argument("--cookies-from-browser", choices=BROWSERS, metavar="NAVIGATEUR",
+                    help="Utiliser la session YouTube de ce navigateur si YouTube demande une vérification "
+                         f"({', '.join(BROWSERS)})")
+    ap.add_argument("-o", "--output", type=Path, help="Fichier de sortie (.txt .csv .json .md .playlist)")
     args = ap.parse_args(argv)
+
+    # Vérifications avant de lancer une analyse qui peut durer une heure.
+    fmt = args.output.suffix.lstrip(".").lower() if args.output else None
+    if args.output and fmt not in EXPORTERS:
+        ap.error(f"Format non supporté : .{fmt} (choix : {', '.join('.' + f for f in EXPORTERS)})")
+    if args.step < 5 or not 5 <= args.clip <= 14:
+        ap.error("--step doit valoir au moins 5 et --clip être entre 5 et 14 secondes")
+    if args.end is not None and args.end <= args.start:
+        ap.error("--end doit être après --start")
+    if args.concurrency < 1:
+        ap.error("--concurrency doit valoir au moins 1")
 
     opts = ScanOptions(step=args.step, clip=args.clip, recognizer=args.recognizer, concurrency=args.concurrency,
                        min_hits=args.min_hits, start=args.start, end=args.end,
-                       check_platforms=not args.no_platforms, use_description=not args.no_description)
-    res = asyncio.run(scan(args.url, opts, _progress))
+                       check_platforms=not args.no_platforms, use_description=not args.no_description,
+                       cookies_from_browser=args.cookies_from_browser)
+    try:
+        res = asyncio.run(scan(args.url, opts, _progress))
+    except KeyboardInterrupt:
+        print("\n⏹  Analyse interrompue. Relancez la même commande : elle reprendra où elle s'était arrêtée.",
+              file=sys.stderr)
+        return 130
+    except Exception as e:
+        print(f"\n❌ {e or type(e).__name__}", file=sys.stderr)
+        return 1
     print("\n", file=sys.stderr)
 
     for t in res.tracks:
@@ -62,9 +88,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"         ❌ introuvable sur : {', '.join(missing)}")
 
     if args.output:
-        fmt = args.output.suffix.lstrip(".").lower()
-        if fmt not in EXPORTERS:
-            ap.error(f"Format non supporté : .{fmt}")
         args.output.write_text(EXPORTERS[fmt](res), encoding="utf-8")
         print(f"\n💾 Enregistré : {args.output}", file=sys.stderr)
     return 0

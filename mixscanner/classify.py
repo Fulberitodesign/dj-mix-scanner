@@ -27,6 +27,14 @@ _REMIXER = re.compile(
     re.I,
 )
 
+# « JPTheDJ Tech House Remix » : le genre (ou l'année) n'est pas le nom du remixeur.
+_GENRE_TAIL = re.compile(
+    r"(?:\s*\b(?:afro|tech|deep|progressive|melodic|latin|bass|future|tropical|organic|minimal|hard|"
+    r"house|techno|trance|techengue|reggaeton|dembow|amapiano|edm|dnb|drum\s*(?:and|&|n)\s*bass|dubstep|"
+    r"trap|garage|ukg|disco|funk|club|festival|extended|radio|original|summer|\d{4}))+\s*$",
+    re.I,
+)
+
 KIND_LABELS_FR = {
     "original": "Original",
     "remix": "Remix",
@@ -63,10 +71,12 @@ def classify(title: str, artist: str = "") -> VersionInfo:
         # Un mashup est souvent indiqué dans le champ artiste ("A vs B").
         if found_in_part or (kind == "mashup" and re.search(pattern, whole, re.I)):
             label = found_in_part or ""
+            if normalize(label) in (kind, normalize(KIND_LABELS_FR.get(kind, "")), "rmx"):
+                label = ""  # « Medusa (Remix) » : le libellé n'apporte rien de plus que le type
             remixer = None
             m = _REMIXER.match(label)
-            if m and m.group(1).strip():
-                remixer = m.group(1).strip()
+            if m:
+                remixer = _GENRE_TAIL.sub("", m.group(1)).strip(" -–") or None
             return VersionInfo(kind=kind, label=label, remixer=remixer)
 
     label = next((p for p in parts if re.search(r"original|radio|single", p, re.I)), "")

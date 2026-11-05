@@ -12,9 +12,10 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
-from . import odesli, spotify_playlist
+from . import spotify_links, spotify_playlist
+from .audio import BROWSERS
 from .export import EXPORTERS
 from .pipeline import ScanOptions, ScanResult, scan
 from .tracklist import build_tracklist
@@ -25,10 +26,26 @@ STATIC = Path(__file__).parent / "static"
 
 class ScanRequest(BaseModel):
     url: str
-    step: float = 30
-    clip: float = 12
+    step: float = Field(30, ge=5, le=300)
+    clip: float = Field(12, ge=5, le=14)  # Shazam ne reconnaît plus rien au-delà de ~14 s
     recognizer: str = "shazam"
     check_platforms: bool = True
+    cookies_from_browser: str = ""
+
+    @field_validator("recognizer")
+    @classmethod
+    def _recognizer(cls, v: str) -> str:
+        if v not in ("shazam", "acrcloud", "audd"):
+            raise ValueError("service de reconnaissance inconnu")
+        return v
+
+    @field_validator("cookies_from_browser")
+    @classmethod
+    def _browser(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v and v not in BROWSERS:
+            raise ValueError(f"navigateur inconnu (choix : {', '.join(BROWSERS)})")
+        return v
 
 
 class Job:
@@ -76,25 +93,34 @@ class Job:
     def run(self) -> None:
         self.status = "running"
         opts = ScanOptions(step=self.req.step, clip=self.req.clip, recognizer=self.req.recognizer,
-                           check_platforms=self.req.check_platforms)
+                           check_platforms=self.req.check_platforms,
+                           cookies_from_browser=self.req.cookies_from_browser or None)
         try:
             self.result = asyncio.run(scan(self.req.url, opts, self.on_event))
             self.tracks = self.result.tracks
             self.status = "done"
         except Exception as e:
-            self.error = str(e)
+            self.error = str(e) or type(e).__name__
             self.status = "error"
 
+    def start_spotify_links(self) -> bool:
+        """Lance la recherche des liens Spotify, sauf si elle tourne déjà (double clic)."""
+        with self.lock:
+            if self.spotify_links.get("status") == "running":
+                return False
+            self.spotify_links = {"status": "running", "done": 0, "total": 0}
+        threading.Thread(target=self.resolve_spotify_links, daemon=True).start()
+        return True
+
     def resolve_spotify_links(self) -> None:
-        """Cherche le lien Spotify de chaque morceau (via song.link), en arrière-plan."""
+        """Cherche le lien Spotify de chaque morceau (MusicBrainz, API Spotify…), en arrière-plan."""
         def progress(done: int, total: int) -> None:
             self.spotify_links.update(done=done, total=total)
 
         async def run() -> tuple[list[str], list, dict]:
-            async with httpx.AsyncClient(timeout=20) as client:
-                return await odesli.resolve_spotify_links(self.result.tracks, client, progress)
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+                return await spotify_links.resolve_spotify_links(self.result.tracks, client, progress)
 
-        self.spotify_links = {"status": "running", "done": 0, "total": 0}
         try:
             links, missing, diag = asyncio.run(run())
             self.spotify_links = {"status": "done", "links": links, "diag": diag,
@@ -142,8 +168,7 @@ def start_spotify_links(job_id: str) -> dict[str, str]:
     job = JOBS.get(job_id)
     if not job or not job.result:
         raise HTTPException(404, "Analyse non terminée")
-    if job.spotify_links.get("status") != "running":
-        threading.Thread(target=job.resolve_spotify_links, daemon=True).start()
+    job.start_spotify_links()
     return {"status": "running"}
 
 

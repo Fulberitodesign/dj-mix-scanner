@@ -3,7 +3,7 @@ et lecture d'une éventuelle tracklist dans la description / les chapitres YouTu
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 
 from .classify import classify, core_title
@@ -36,7 +36,7 @@ def build_tracklist(
     hits = sorted(hits, key=lambda h: h.offset)
     runs: list[_Run] = []
     for h in hits:
-        if h.match is None:
+        if h.match is None or not (h.match.title or h.match.artist):
             continue
         key = h.match.key
         if runs and runs[-1].key == key and h.offset - runs[-1].last <= max_gap:
@@ -44,7 +44,8 @@ def build_tracklist(
             runs[-1].count += 1
             _enrich(runs[-1].match, h.match)
         else:
-            runs.append(_Run(key, h.match, h.offset, h.offset, 1))
+            # copie : les détections d'origine (cache, affichage en direct) ne doivent pas être modifiées
+            runs.append(_Run(key, replace(h.match, links=dict(h.match.links)), h.offset, h.offset, 1))
 
     changed = True
     while changed:
@@ -130,6 +131,7 @@ def parse_description(description: str, chapters: list[dict] | None = None) -> l
             if not m:
                 continue
             text, start = m.group(1), _secs(m.group(2), m.group(3), m.group(4))
+        text = re.sub(r"^\s*\d{1,3}\s*[.)]\s+", "", text)  # « [00:00] 01. Artiste - Titre »
         text = text.strip(" -–—|")
         if len(text) < 3 or not re.search(r"[A-Za-z]", text):
             continue
@@ -147,6 +149,44 @@ def similarity(artist_a: str, title_a: str, artist_b: str, title_b: str) -> floa
     return 0.65 * t + 0.35 * a
 
 
+_MASHUP_SEP = re.compile(r"\s+(?:vs\.?|x)\s+", re.I)
+
+
+def _mashup_parts(title: str) -> list[str]:
+    """« Who's That Girl vs. SECRETO VICTORIA (Lara Mashup) » -> ["who s that girl", "secreto victoria"]."""
+    parts = [core_title(p) for p in _MASHUP_SEP.split(title or "")]
+    parts = [p for p in parts if p]
+    return parts if len(parts) >= 2 else []
+
+
+def _absorb_mashup(tracks: list[Track], used: set[int], e: DescEntry, window: float) -> bool:
+    """Un mashup listé par l'uploader est souvent reconnu à l'écoute comme ses morceaux d'origine,
+    détectés séparément : on les regroupe en un seul morceau, avec le nom donné par l'uploader."""
+    parts = _mashup_parts(e.title)
+    if not parts or classify(e.title, e.artist).kind != "mashup":
+        return False
+    comps = [i for i, t in enumerate(tracks)
+             if i not in used and t.source != "description" and abs(t.start - e.start) <= window
+             and max(SequenceMatcher(None, p, core_title(t.title)).ratio() for p in parts) >= 0.7]
+    if not comps:
+        return False
+    first = tracks[comps[0]]
+    group = [tracks[i] for i in comps]
+    first.start = min(t.start for t in group)
+    first.end = max(t.end for t in group)
+    first.hits = sum(t.hits for t in group)
+    first.title, first.artist = e.title, e.artist
+    first.version = classify(e.title, e.artist)
+    first.source, first.confidence = "audio+description", "high"
+    # L'ISRC et les liens sont ceux d'un morceau d'origine, pas du mashup : on les retire.
+    first.isrc = first.album = first.label = first.year = None
+    first.links = {}
+    used.update(comps)
+    for i in comps[1:]:
+        tracks[i].index = -1  # supprimé plus bas
+    return True
+
+
 def merge_with_description(tracks: list[Track], entries: list[DescEntry], window: float = 240.0) -> list[Track]:
     """Croise la détection audio avec la tracklist de l'uploader.
 
@@ -156,6 +196,8 @@ def merge_with_description(tracks: list[Track], entries: list[DescEntry], window
     used: set[int] = set()
     for e in entries:
         if normalize(e.title) in ("id", "") or normalize(e.artist) == "id":
+            continue
+        if _absorb_mashup(tracks, used, e, window):
             continue
         best, best_score = None, 0.0
         for i, t in enumerate(tracks):
@@ -174,6 +216,7 @@ def merge_with_description(tracks: list[Track], entries: list[DescEntry], window
             version=classify(e.title, e.artist), source="description", confidence="medium",
         ))
 
+    tracks = [t for t in tracks if t.index != -1]
     tracks.sort(key=lambda t: t.start)
     for i, t in enumerate(tracks):
         t.index = i + 1

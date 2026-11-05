@@ -71,6 +71,7 @@ class PlatformResult:
     matched_title: str | None = None
     same_version: bool | None = None
     note: str | None = None
+    isrc: str | None = None
 
 
 @dataclass

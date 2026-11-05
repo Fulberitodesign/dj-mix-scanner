@@ -87,6 +87,14 @@
       <option value="acrcloud">ACRCloud</option>
       <option value="audd">AudD</option>
     </select>
+    <select id="cookies" title="Si YouTube demande de confirmer que vous n'êtes pas un robot : utiliser la session YouTube de ce navigateur">
+      <option value="">Cookies YouTube : aucun</option>
+      <option value="chrome">Cookies : Chrome</option>
+      <option value="safari">Cookies : Safari</option>
+      <option value="firefox">Cookies : Firefox</option>
+      <option value="edge">Cookies : Edge</option>
+      <option value="brave">Cookies : Brave</option>
+    </select>
     <label class="opt"><input type="checkbox" id="plat" checked> Vérifier les plateformes</label>
     <button class="primary" id="go">Analyser</button>
   </form>
@@ -107,29 +115,35 @@
 
   <section id="playlist" hidden>
     <h2>🎵 Créer une playlist Spotify</h2>
-    <p><strong>Méthode recommandée — avec l'app Spotify (gratuit, sans Premium) :</strong></p>
+    <p><strong>Méthode recommandée — gratuite, sans Premium :</strong></p>
     <ol class="steps">
-      <li>Cliquez sur « Préparer les liens Spotify » (environ 6 s par morceau, laissez la page ouverte).</li>
+      <li>Cliquez sur « Copier la liste » (une ligne « Artiste - Titre » par morceau).</li>
+      <li>Ouvrez TuneMyMusic (ou Spotlistr), collez la liste, connectez votre compte Spotify : la playlist est créée.</li>
+    </ol>
+    <textarea id="pl-text" readonly></textarea>
+    <div class="row">
+      <button class="primary" id="pl-copy" type="button">📋 Copier la liste</button>
+      <a class="btn" href="https://www.tunemymusic.com/fr/transfer" target="_blank" rel="noopener">TuneMyMusic</a>
+      <a class="btn" href="https://www.spotlistr.com/search/textbox" target="_blank" rel="noopener">Spotlistr</a>
+      <a class="btn" id="pl-dl">Télécharger (.txt)</a>
+    </div>
+
+    <p style="margin-top:20px"><strong>Autre méthode — liens Spotify à coller dans l'app :</strong>
+      l'outil cherche le lien Spotify de chaque morceau (base MusicBrainz, ou API Spotify si vos clés sont configurées).
+      Sans clé Spotify, les morceaux peu connus (remix, edits de DJ) sont souvent introuvables.</p>
+    <ol class="steps">
+      <li>Cliquez sur « Préparer les liens Spotify » (1 à 3 s par morceau, laissez la page ouverte).</li>
       <li>Cliquez sur « Copier les liens Spotify ».</li>
       <li>Dans l'app Spotify : <em>+ Créer → Playlist</em>, cliquez dans la playlist vide puis faites <strong>Cmd + V</strong>.</li>
     </ol>
     <div class="row">
-      <button class="primary" id="sl-go" type="button">🔗 Préparer les liens Spotify</button>
+      <button id="sl-go" type="button">🔗 Préparer les liens Spotify</button>
       <span id="sl-status" class="muted"></span>
     </div>
     <div id="sl-result" hidden>
       <textarea id="sl-text" readonly></textarea>
-      <div class="row"><button class="primary" id="sl-copy" type="button">📋 Copier les liens Spotify</button></div>
+      <div class="row"><button id="sl-copy" type="button">📋 Copier les liens Spotify</button></div>
       <p id="sl-missing"></p>
-    </div>
-
-    <p style="margin-top:20px"><strong>Autre méthode :</strong> copiez la liste « Artiste - Titre » et collez-la dans TuneMyMusic ou Spotlistr.</p>
-    <textarea id="pl-text" readonly></textarea>
-    <div class="row">
-      <button id="pl-copy" type="button">📋 Copier la liste</button>
-      <a class="btn" href="https://www.tunemymusic.com/fr/transfer" target="_blank" rel="noopener">TuneMyMusic</a>
-      <a class="btn" href="https://www.spotlistr.com/search/textbox" target="_blank" rel="noopener">Spotlistr</a>
-      <a class="btn" id="pl-dl">Télécharger (.txt)</a>
     </div>
     <div id="pl-direct" hidden>
       <p><strong>Connexion directe :</strong> l'outil crée la playlist lui-même sur votre compte (app Spotify avec Web API requise).</p>
@@ -150,27 +164,35 @@ const STAGES = { queued: "En attente…", download: "Téléchargement de l'audio
   platforms: "Vérification des plateformes", retry: "Nouvel essai sur les extraits en échec" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let timer = null;
+const plural = (n, word, many = word + "s") => `${n} ${n > 1 ? many : word}`;
 
 $("f").addEventListener("submit", async (e) => {
   e.preventDefault();
   clearTimeout(timer);
   $("list").innerHTML = ""; $("head").hidden = true; $("playlist").hidden = true; $("sl-result").hidden = true;
   $("sl-status").textContent = ""; clearTimeout(slTimer); $("exports").hidden = true; $("legend").hidden = true;
+  $("sl-go").disabled = false; $("sl-copy").textContent = "📋 Copier les liens Spotify"; $("prog").style.width = "0";
   $("go").disabled = true;
   $("warn").textContent = "";
   $("status").textContent = "Démarrage…";
   try {
     const r = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: $("url").value, step: +$("step").value, recognizer: $("rec").value,
-        check_platforms: $("plat").checked }) });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      body: JSON.stringify({ url: $("url").value.trim(), step: +$("step").value, recognizer: $("rec").value,
+        check_platforms: $("plat").checked, cookies_from_browser: $("cookies").value }) });
+    if (!r.ok) {
+      const detail = (await r.json().catch(() => ({}))).detail;
+      throw new Error(Array.isArray(detail) ? detail.map((d) => d.msg).join(" ; ") : detail || r.statusText);
+    }
     poll((await r.json()).id);
   } catch (err) { fail(err.message); }
 });
 
 let slTimer = null;
 async function pollSpotifyLinks(id) {
-  const st = (await (await fetch(`/api/jobs/${id}`)).json()).spotify_links || {};
+  let job;
+  try { job = await (await fetch(`/api/jobs/${id}`)).json(); }
+  catch (e) { slTimer = setTimeout(() => pollSpotifyLinks(id), 3000); return; }
+  const st = job.spotify_links || {};
   if (st.status === "running") {
     $("sl-status").textContent = st.total ? `Recherche… ${st.done}/${st.total} morceaux` : "Recherche…";
     slTimer = setTimeout(() => pollSpotifyLinks(id), 2000);
@@ -179,15 +201,17 @@ async function pollSpotifyLinks(id) {
   $("sl-go").disabled = false;
   if (st.status === "error") { $("sl-status").textContent = "Erreur : " + st.error; return; }
   if (st.status !== "done") return;
-  $("sl-status").textContent = `${st.links.length ? "✅" : "⚠️"} ${st.links.length} liens Spotify trouvés`;
+  $("sl-status").textContent = `${st.links.length ? "✅" : "⚠️"} ${plural(st.links.length, "lien Spotify trouvé", "liens Spotify trouvés")}`;
   $("sl-text").value = st.links.join("\n");
+  render(job);  // affiche les nouveaux badges Spotify
   const d = st.diag || {};
   const why = [];
-  if (d.not_on_spotify) why.push(`${d.not_on_spotify} absents de Spotify`);
-  if (d.no_source) why.push(`${d.no_source} introuvables sur Deezer / Apple Music`);
-  if (d.errors) why.push(`${d.errors} erreurs song.link (${d.first_error})`);
+  const by = Object.entries(d.found_by || {}).map(([k, v]) => `${v} ${k}`);
+  if (by.length) $("sl-status").textContent += ` (${by.join(", ")})`;
+  if (d.errors) why.push(`${d.errors} erreur(s) : ${d.first_error}`);
   $("sl-missing").textContent = st.missing.length
-    ? `Sans lien Spotify (${st.missing.length}${why.length ? " — " + why.join(", ") : ""}) : ${st.missing.join(" · ")}` : "";
+    ? `Sans lien Spotify (${st.missing.length}${why.length ? " — " + why.join(", ") : ""}) : ${st.missing.join(" · ")}. `
+      + `Ajoutez-les à la main avec la recherche Spotify, ou utilisez « Copier la liste » + TuneMyMusic ci-dessus.` : "";
   $("sl-result").hidden = false;
 }
 
@@ -203,7 +227,7 @@ async function showPlaylist(id) {
   const n = text.trim() ? text.trim().split("\n").length : 0;
   if (!n) return;
   $("pl-text").value = text;
-  $("pl-copy").textContent = `📋 Copier la liste (${n} morceaux)`;
+  $("pl-copy").textContent = `📋 Copier la liste (${plural(n, "morceau", "morceaux")})`;
   $("pl-dl").href = `/api/jobs/${id}/export.playlist`;
   $("pl-oauth").href = `/spotify/login?job=${id}`;
   try { $("pl-direct").hidden = !(await (await fetch("/api/spotify/config")).json()).oauth; } catch (e) {}
@@ -229,7 +253,7 @@ async function poll(id) {
   if (job.status === "error") return fail(job.error);
   if (job.status === "done") {
     $("go").disabled = false;
-    $("status").textContent = `Terminé : ${job.tracks.length} morceaux identifiés.`;
+    $("status").textContent = `Terminé : ${plural(job.tracks.length, "morceau identifié", "morceaux identifiés")}.`;
     $("prog").style.width = "100%";
     for (const f of ["txt", "csv", "md", "json"]) $(`x-${f}`).href = `/api/jobs/${id}/export.${f}`;
     $("exports").hidden = false;
@@ -243,7 +267,7 @@ function render(job) {
   const pct = Math.round((job.progress || 0) * 100);
   $("prog").style.width = pct + "%";
   if (job.status === "running" || job.status === "queued")
-    $("status").textContent = `${STAGES[job.stage] || job.stage}… ${pct} % · ${job.tracks.length} morceaux trouvés`;
+    $("status").textContent = `${STAGES[job.stage] || job.stage}… ${pct} % · ${plural(job.tracks.length, "morceau trouvé", "morceaux trouvés")}`;
   const w = job.warnings || [];
   const nw = job.warning_count || w.length;
   $("warn").textContent = w.length ? `⚠️ ${nw} extrait(s) non analysé(s) (retentés automatiquement à la fin) — dernier : ${w[w.length - 1]}` : "";

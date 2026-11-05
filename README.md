@@ -19,7 +19,8 @@ SoundCloud, Deezer, Apple Music, YouTube** (+ liens de recherche Beatport et Goo
 
 ## Installation
 
-Prérequis : Python 3.10+ et [ffmpeg](https://ffmpeg.org/download.html).
+Prérequis : Python 3.10+ (ffmpeg est fourni automatiquement par `imageio-ffmpeg`). Sur Mac, vous pouvez
+aussi double-cliquer sur « Lancer Mix Scanner.command », qui installe tout puis ouvre l'interface.
 
 ```bash
 pip install -r requirements.txt
@@ -51,17 +52,33 @@ python -m mixscanner mon_mix.mp3 --start 1800 --end 3600 --no-platforms
 | `--start / --end` | n'analyser qu'une partie du mix |
 | `--no-platforms` | ne pas vérifier Spotify/SoundCloud/… |
 | `--no-description` | ignorer la tracklist de la description |
+| `--cookies-from-browser chrome` | utiliser votre session YouTube (si YouTube demande « confirmez que vous n'êtes pas un robot ») |
+| `-o fichier.ext` | export `.txt`, `.csv`, `.md`, `.json` ou `.playlist` (vérifié avant de lancer l'analyse) |
 
-Un mix d'1 h ≈ 120 extraits. Les résultats sont mis en cache (`~/.cache/mixscanner`) :
-relancer la même vidéo ne refait pas la reconnaissance.
+Un mix d'1 h ≈ 120 extraits. Les résultats sont mis en cache (`~/.cache/mixscanner`), y compris
+pour les fichiers locaux : relancer le même mix ne refait pas la reconnaissance, et un scan interrompu
+(Ctrl + C, fenêtre fermée) reprend là où il s'était arrêté.
+
+### YouTube demande « confirmez que vous n'êtes pas un robot »
+YouTube bloque parfois les téléchargements automatiques. Choisissez votre navigateur dans
+**« Cookies YouTube »** (interface web) ou ajoutez `--cookies-from-browser chrome` (ligne de commande) :
+l'outil utilise alors la session YouTube de ce navigateur (connectez-vous d'abord à YouTube dedans).
+Safari demande d'autoriser le Terminal dans *Réglages Système → Confidentialité → Accès complet au disque*.
+Pour que ce soit permanent : `export MIXSCANNER_COOKIES_FROM_BROWSER=chrome`.
 
 ## Créer une playlist Spotify
 
 À la fin de l'analyse, la page propose un panneau **« Créer une playlist Spotify »** :
 
-- **Sans Spotify Premium** : « Copier la liste » copie une ligne « Artiste - Titre » par morceau
-  (sans doublons ni « ID »). Collez-la dans [Spotlistr](https://www.spotlistr.com/search/textbox)
-  ou [TuneMyMusic](https://www.tunemymusic.com/fr/transfer), connectez votre compte Spotify : la playlist est créée.
+- **Méthode recommandée (gratuite, sans Premium)** : « Copier la liste » copie une ligne « Artiste - Titre »
+  par morceau (sans doublons ni « ID »). Collez-la dans [TuneMyMusic](https://www.tunemymusic.com/fr/transfer)
+  ou [Spotlistr](https://www.spotlistr.com/search/textbox), connectez votre compte Spotify : la playlist est créée.
+- **Liens Spotify à coller dans l'app** : « Préparer les liens Spotify » cherche le lien de chaque morceau,
+  puis vous les collez (Cmd + V) dans une playlist vide de l'app Spotify. Les liens viennent de la
+  vérification Spotify (si vos clés sont configurées) ou de [MusicBrainz](https://musicbrainz.org) (gratuit,
+  sans clé), qui connaît bien les morceaux grand public mais rarement les remix et edits de DJ.
+  > L'API gratuite de song.link, utilisée auparavant, a été fermée en 2026. Si vous disposez d'une clé
+  > song.link, définissez `ODESLI_API_KEY` pour l'utiliser en complément.
 - **Connexion directe** (si `SPOTIFY_CLIENT_ID` est défini et que l'app Spotify a la « Web API », réservée
   aux comptes Premium) : l'outil crée lui-même la playlist privée sur votre compte. Ajoutez
   `http://127.0.0.1:8000/callback` dans les « Redirect URIs » de l'app.
@@ -74,8 +91,12 @@ relancer la même vidéo ne refait pas la reconnaissance.
 | `SOUNDCLOUD_CLIENT_ID` | vérification SoundCloud (sinon : lien de recherche) |
 | `ACRCLOUD_HOST`, `ACRCLOUD_ACCESS_KEY`, `ACRCLOUD_ACCESS_SECRET` | reconnaissance ACRCloud — **la plus fiable sur les mixes DJ** (pitch/tempo modifiés, voix MC) |
 | `AUDD_API_TOKEN` | reconnaissance AudD |
+| `MIXSCANNER_COOKIES_FROM_BROWSER` | navigateur dont la session YouTube est utilisée (`chrome`, `safari`, `firefox`…) |
+| `ODESLI_API_KEY` | clé song.link (facultative) pour trouver plus de liens Spotify |
+| `MIXSCANNER_CACHE` | dossier du cache (défaut `~/.cache/mixscanner`) |
 
-Deezer, Apple Music et YouTube sont vérifiés sans clé.
+Deezer, Apple Music et YouTube sont vérifiés sans clé (Apple Music limite à ~20 recherches par minute :
+l'outil espace ses requêtes et réutilise le lien Apple Music fourni par Shazam quand il existe).
 
 Statuts : ✅ disponible · « autre version » = le titre existe mais pas cette version (ex. remix absent,
 seul l'original est sorti) · ❌ introuvable · 🔎 lien de recherche non vérifié.

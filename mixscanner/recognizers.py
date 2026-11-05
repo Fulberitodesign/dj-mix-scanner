@@ -15,6 +15,7 @@ from typing import Protocol
 import httpx
 
 from .models import Match
+from .throttle import Throttle
 
 
 class Recognizer(Protocol):
@@ -37,18 +38,59 @@ async def _with_retries(coro_factory, attempts: int = 4, base_delay: float = 2.0
 
 class ShazamRecognizer:
     name = "shazam"
+    attempt_timeout = 10.0  # une réponse normale arrive en moins d'une seconde
 
-    def __init__(self) -> None:
+    def __init__(self, interval: float = 1.0) -> None:
+        # Shazam répond en ~0,3 s mais bloque (« RateLimited ») si on enchaîne plusieurs requêtes par
+        # seconde : on les espace d'environ 1 s, ce qui reste rapide (≈ 2 min pour un mix d'1 h).
+        self._throttle = Throttle(interval)
+        self._penalty = 0.0
         from shazamio import Shazam
 
         from .audio import ffmpeg_exe
 
         ffmpeg_exe()  # shazamio_core a besoin de « ffmpeg » dans le PATH
-        self._shazam = Shazam()
+        self._http = None
+        try:
+            # Par défaut, shazamio relance en silence jusqu'à 20 fois quand Shazam répond « trop de
+            # requêtes » : une requête peut alors bloquer 30 s ou plus. On le limite à 2 essais rapides ;
+            # nos propres relances (avec pauses croissantes) prennent le relais.
+            from aiohttp_retry import ExponentialRetry
+            from shazamio.client import HTTPClient
+
+            self._http = HTTPClient(retry_options=ExponentialRetry(
+                attempts=2, max_timeout=1, statuses={500, 502, 503, 504, 429}))
+            self._shazam = Shazam(http_client=self._http)
+        except (ImportError, TypeError):  # ancienne version de shazamio
+            self._shazam = Shazam()
 
     async def recognize(self, wav: bytes) -> Match | None:
-        out = await _with_retries(lambda: self._shazam.recognize(wav))
-        return self.parse(out)
+        attempts = 6
+        for i in range(attempts):
+            await self._throttle.wait()
+            try:
+                out = await asyncio.wait_for(self._shazam.recognize(wav), self.attempt_timeout)
+                self._penalty = 0.0
+                return self.parse(out)
+            except Exception as e:
+                limited = "ratelimit" in type(e).__name__.lower() or "rate limited" in str(e).lower()
+                if i == attempts - 1:
+                    if limited:
+                        raise RuntimeError("Shazam limite temporairement le nombre de requêtes") from None
+                    raise
+                if limited:
+                    # Pause commune à tous les extraits : réessayer chacun de son côté prolonge le blocage.
+                    self._penalty = min(30.0, max(5.0, self._penalty * 2))
+                    self._throttle.pause(self._penalty)
+                else:
+                    await asyncio.sleep(2 * 2**i)
+        return None
+
+    async def aclose(self) -> None:
+        for obj in (self._shazam, self._http):
+            close = getattr(obj, "close", None)
+            if close:
+                await close()
 
     @staticmethod
     def parse(out: dict) -> Match | None:
@@ -118,10 +160,17 @@ class ACRCloudRecognizer:
 
         return self.parse(await _with_retries(call), self.min_score)
 
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
     @staticmethod
     def parse(out: dict, min_score: int = 70) -> Match | None:
-        if (out.get("status") or {}).get("code") != 0:
+        status = out.get("status") or {}
+        code = status.get("code")
+        if code in (1001, 2004):  # aucun résultat / extrait trop court ou silencieux
             return None
+        if code != 0:  # clé invalide, quota dépassé… : à signaler, pas à confondre avec « inconnu »
+            raise RuntimeError(f"ACRCloud : {status.get('msg') or 'erreur'} (code {code})")
         music = (out.get("metadata") or {}).get("music") or []
         if not music:
             return None
@@ -181,8 +230,14 @@ class AuddRecognizer:
 
         return self.parse(await _with_retries(call))
 
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
     @staticmethod
     def parse(out: dict) -> Match | None:
+        if out.get("status") == "error":
+            err = out.get("error") or {}
+            raise RuntimeError(f"AudD : {err.get('error_message') or 'erreur'} (code {err.get('error_code')})")
         res = out.get("result") if out.get("status") == "success" else None
         if not res:
             return None
