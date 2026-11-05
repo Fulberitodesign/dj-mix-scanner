@@ -737,3 +737,19 @@ def test_karaoke_and_other_artists_are_not_accepted_as_matches():
     assert _best(t, cands + [("JAY-Z", "Ni**as in Paris", "ok")])[1] == "ok"
     assert _best(_t("Swag Surfin'", "F.L.Y. - Fast Life Yungstaz"),
                  [("F.L.Y. (Fast Life Yungstaz)", "Swag Surfin'", "fly")])[1] == "fly"
+
+
+def test_quit_only_available_in_mac_app(monkeypatch):
+    from fastapi.testclient import TestClient
+    from mixscanner import web
+
+    client = TestClient(web.app)
+    monkeypatch.delenv("MIXSCANNER_APP", raising=False)
+    assert client.get("/api/app").json()["app"] is False
+    assert client.post("/api/quit").status_code == 404
+    monkeypatch.setenv("MIXSCANNER_APP", "1")
+    stopped = []
+    monkeypatch.setattr(web, "_quit_callbacks", [lambda: stopped.append(1)])
+    assert client.get("/api/app").json()["app"] is True
+    assert client.post("/api/quit").status_code == 200 and stopped == [1]
+    assert web.idle_seconds() < 5

@@ -1,0 +1,72 @@
+name: Application Mac (DMG)
+
+on:
+  push:
+    branches: [main, corrections-fonctionnement]
+    paths: ["mixscanner/**", "packaging/**", "requirements.txt", ".github/workflows/macos-app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15        # Apple Silicon (M1, M2, M3, M4…)
+          - runner: macos-15-intel  # Mac Intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tests
+        run: |
+          python -m pip install -q -r requirements.txt
+          python -m pytest -q
+      - name: Construction de l'app et du DMG
+        run: |
+          set -o pipefail
+          PYTHON=python packaging/macos/build.sh 2>&1 | tee build.log
+      - name: Erreur de construction (résumé)
+        if: failure()
+        run: |
+          for f in build.log; do [ -f "$f" ] || continue
+            msg=$(grep -v " INFO: \| DEBUG: " "$f" | tail -40 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=${{ matrix.runner }}::${msg}"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.runner }}
+          path: dist/*.dmg
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dmg
+          merge-multiple: true
+      - name: Publication (Release « mac-app »)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete mac-app --cleanup-tag --yes || true
+          gh release create mac-app dmg/*.dmg --target "${{ github.sha }}" --prerelease \
+            --title "Mix Scanner pour Mac" \
+            --notes "Application Mac prête à installer (branche ${{ github.ref_name }}, commit ${GITHUB_SHA::7}).
+
+          - **MixScanner-…-AppleSilicon.dmg** : Mac M1, M2, M3, M4 (menu  → À propos de ce Mac → « Puce Apple »)
+          - **MixScanner-…-Intel.dmg** : Mac avec processeur Intel
+
+          Ouvrez le DMG, glissez Mix Scanner dans Applications, puis lisez LISEZ-MOI.txt pour la première ouverture (macOS 11 ou plus récent)."

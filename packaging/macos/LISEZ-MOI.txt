@@ -1,0 +1,19 @@
+MIX SCANNER — INSTALLATION
+
+1. Glissez « Mix Scanner » dans le dossier « Applications ».
+2. Ouvrez « Mix Scanner » depuis le dossier Applications.
+
+   La première fois, macOS bloque l'app car elle ne vient pas de l'App Store :
+   - macOS 15 (Sequoia) et plus récent : cliquez « OK », puis ouvrez Réglages Système
+     → Confidentialité et sécurité, descendez et cliquez « Ouvrir quand même ».
+   - macOS 14 et plus ancien : clic droit (ou Ctrl + clic) sur l'app → « Ouvrir » → « Ouvrir ».
+   - Si macOS dit que l'app « est endommagée », ouvrez le Terminal et tapez :
+       xattr -cr "/Applications/Mix Scanner.app"
+     puis ouvrez-la de nouveau.
+
+3. La page de Mix Scanner s'ouvre dans votre navigateur (http://127.0.0.1:8000).
+   L'app n'a pas d'icône dans le Dock : pour l'arrêter, cliquez « Quitter » en haut de la page.
+   Elle s'arrête aussi toute seule après 2 heures sans utilisation.
+   Rouvrir l'app rouvre simplement la page.
+
+Journal en cas de problème : ~/Library/Logs/MixScanner.log

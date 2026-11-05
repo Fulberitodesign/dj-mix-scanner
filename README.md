@@ -17,6 +17,18 @@ SoundCloud, Deezer, Apple Music, YouTube** (+ liens de recherche Beatport et Goo
 6. **Plateformes** : chaque morceau est cherché (par ISRC quand c'est possible, sinon par titre/artiste)
    et l'outil indique si la version trouvée est la même (ex. le remix existe-t-il, ou seulement l'original ?).
 
+## Application Mac (DMG)
+
+La façon la plus simple : téléchargez le DMG sur la page
+[Releases → « Mix Scanner pour Mac »](https://github.com/Fulberitodesign/dj-mix-scanner/releases/tag/mac-app)
+(**AppleSilicon** pour les Mac M1/M2/M3/M4, **Intel** sinon), ouvrez-le et glissez « Mix Scanner » dans
+Applications. Rien d'autre à installer (Python, ffmpeg et le module YouTube sont inclus), macOS 11 minimum.
+La première ouverture demande une autorisation : voir `LISEZ-MOI.txt` dans le DMG.
+
+L'app ouvre l'interface dans le navigateur ; le bouton « Quitter » en haut de la page l'arrête.
+Les DMG sont reconstruits automatiquement par GitHub Actions (`.github/workflows/macos-app.yml`) ;
+pour les construire soi-même sur un Mac : `packaging/macos/build.sh`.
+
 ## Installation
 
 Prérequis : Python 3.10+ (ffmpeg est fourni automatiquement par `imageio-ffmpeg`). Sur Mac, vous pouvez

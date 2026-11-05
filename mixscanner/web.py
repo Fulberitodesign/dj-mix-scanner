@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import html
+import os
 import secrets
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -22,6 +24,45 @@ from .tracklist import build_tracklist
 
 app = FastAPI(title="Mix Scanner")
 STATIC = Path(__file__).parent / "static"
+
+# --- Mode application Mac : activité, arrêt ----------------------------------------------
+_last_activity = time.monotonic()
+_quit_callbacks: list = []
+
+
+def on_quit(callback) -> None:
+    _quit_callbacks.append(callback)
+
+
+def idle_seconds() -> float:
+    return time.monotonic() - _last_activity
+
+
+def busy() -> bool:
+    return any(j.status in ("queued", "running") or j.spotify_links.get("status") == "running"
+               for j in JOBS.values())
+
+
+@app.middleware("http")
+async def _track_activity(request: Request, call_next):
+    global _last_activity
+    _last_activity = time.monotonic()
+    return await call_next(request)
+
+
+@app.get("/api/app")
+def app_info() -> dict[str, Any]:
+    from . import __version__
+    return {"app": os.environ.get("MIXSCANNER_APP") == "1", "version": __version__}
+
+
+@app.post("/api/quit")
+def quit_app() -> dict[str, str]:
+    if os.environ.get("MIXSCANNER_APP") != "1" or not _quit_callbacks:
+        raise HTTPException(404, "Disponible uniquement dans l'application Mac")
+    for cb in _quit_callbacks:
+        cb()
+    return {"status": "bye"}
 
 
 class ScanRequest(BaseModel):

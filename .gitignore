@@ -6,3 +6,6 @@ output/
 .pytest_cache/
 bin/
 mix-scanner.zip
+build/
+dist/
+*.spec

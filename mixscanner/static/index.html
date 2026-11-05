@@ -76,7 +76,10 @@
 </head>
 <body>
 <main>
-  <h1>🎧 Mix Scanner</h1>
+  <div class="row" style="justify-content:space-between;margin:0">
+    <h1>🎧 Mix Scanner</h1>
+    <button id="quit" type="button" hidden title="Arrêter Mix Scanner">⏻ Quitter</button>
+  </div>
   <p class="sub">Collez le lien d'un mix DJ (YouTube, SoundCloud, Mixcloud…) : chaque morceau est identifié dans l'ordre, avec sa version et sa disponibilité sur les plateformes.</p>
 
   <form id="f">
@@ -259,6 +262,13 @@ async function copyFrom(textareaId, button, doneText) {
 $("pl-copy").addEventListener("click", (e) => copyFrom("pl-text", e.currentTarget, "✅ Copié !"));
 $("sl-copy").addEventListener("click", (e) =>
   copyFrom("sl-text", e.currentTarget, "✅ Copié ! Collez-les (Cmd + V) dans une playlist de l'app Spotify"));
+
+fetch("/api/app").then((r) => r.json()).then((info) => { $("quit").hidden = !info.app; }).catch(() => {});
+$("quit").addEventListener("click", async () => {
+  if (!confirm("Arrêter Mix Scanner ? Les analyses en cours seront interrompues (elles reprendront au prochain lancement).")) return;
+  try { await fetch("/api/quit", { method: "POST" }); } catch (e) {}
+  document.body.innerHTML = '<main><h1>🎧 Mix Scanner est arrêté</h1><p class="sub">Vous pouvez fermer cet onglet. Pour le relancer, ouvrez l\'application Mix Scanner.</p></main>';
+});
 
 function fail(msg) { $("status").innerHTML = `<span class="err">Erreur : ${esc(msg)}</span>`; $("go").disabled = false; }
 
