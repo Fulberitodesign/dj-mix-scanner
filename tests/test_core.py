@@ -232,7 +232,8 @@ def test_end_to_end(mix_file, tmp_path):
     assert res.tracks[1].version.kind == "remix" and res.tracks[1].version.remixer == "Fisher"
     assert "recognize" in events and "tracklist" in events
     for fmt, fn in EXPORTERS.items():
-        assert "Track C" in fn(res)
+        if fmt != "review":  # n'exporte que les morceaux douteux
+            assert "Track C" in fn(res)
     assert json.loads(EXPORTERS["json"](res))["stats"]["tracks"] == 3
 
 
@@ -671,3 +672,68 @@ def test_web_validation_and_spotify_links_started_once(monkeypatch):
     import time
     time.sleep(0.1)
     assert len(started) == 1
+
+
+# --- versions copiées et liste « propre » pour Spotlistr ---------------------------------
+
+def test_lookalike_versions_next_to_each_other_are_merged():
+    hits = [Hit(0, m("Last Last (DJ Stavo Amapiano Remix) [Mixed]", "Burna Boy")),
+            Hit(30, m("Last Last (Afro Dancehall)", "SKL SOUND")),
+            Hit(60, m("A Box", "Drxse")), Hit(90, m("The Box", "Roddy Ricch")),
+            Hit(120, m("If", "Davido"))]
+    tracks = build_tracklist(hits, 12, 200)
+    assert [(t.artist, t.start) for t in tracks] == [("Burna Boy", 0), ("Drxse", 60), ("Davido", 120)]
+    assert [a.artist for a in tracks[0].alternatives] == ["SKL SOUND"]
+    assert tracks[1].ambiguous and tracks[1].needs_review and tracks[1].confidence == "low"
+    assert not tracks[2].alternatives
+
+
+def test_original_then_remix_both_played_are_kept():
+    hits = [Hit(o, m("Opus", "Eric Prydz")) for o in (0, 30, 60)] + \
+           [Hit(o, m("Opus (Four Tet Remix)", "Eric Prydz")) for o in (90, 120)]
+    assert len(build_tracklist(hits, 12, 200)) == 2
+
+
+def test_most_popular_version_is_kept_when_shazam_hesitates():
+    from mixscanner.pipeline import pick_most_popular
+
+    tracks = build_tracklist([Hit(60, m("A Box", "Drxse")), Hit(90, m("The Box", "Roddy Ricch"))], 12, 200)
+
+    class Pop:
+        async def deezer_popularity(self, artist, title):
+            return {"Drxse": 1200, "Roddy Ricch": 950000}[artist]
+
+    asyncio.run(pick_most_popular(tracks, Pop()))
+    assert (tracks[0].artist, tracks[0].title) == ("Roddy Ricch", "The Box")
+    assert [a.artist for a in tracks[0].alternatives] == ["Drxse"]
+
+
+def test_playlist_lines_are_easy_to_find_on_spotify():
+    from mixscanner.export import playlist_line
+    from mixscanner.models import PlatformResult
+
+    dz = lambda title, same=True: [PlatformResult("deezer", "available", matched_title=title, same_version=same)]
+    assert playlist_line(_t("F**k Up Some Commas", "Future", availability=dz("Future - Fuck Up Some Commas"))) \
+        == "Future - Fuck Up Some Commas"
+    assert playlist_line(_t("Ni**as in Paris", "JAŸ-Z & Kanye West")) == "JAŸ-Z - Ni**as in Paris"
+    assert playlist_line(_t("Umbrella (feat. JAŸ-Z) [Mixed]", "Rihanna")) == "Rihanna - Umbrella"
+    assert playlist_line(_t("Swag Surfin'", "F.L.Y. - Fast Life Yungstaz")) == "F.L.Y. - Swag Surfin'"
+    assert playlist_line(_t("Tahara - Tokyo Drift", "Tahara (Br)")) == "Tahara - Tahara - Tokyo Drift"
+    assert playlist_line(_t("Mercy (feat. Big Sean, Pusha T & 2 Chainz)", "Kanye West")) == "Kanye West - Mercy"
+    # remix joué mais seul l'original existe sur Deezer : on garde le nom du remix
+    assert playlist_line(_t("Party In the U.S.A. (JWeezy Remix)", "Miley Cyrus",
+                            availability=dz("Miley Cyrus - Party In the U.S.A.", same=False))) \
+        == "Miley Cyrus - Party In the U.S.A. (JWeezy Remix)"
+    res = _result_with([_t("Umbrella (feat. JAŸ-Z) [Mixed]", "Rihanna"), _t("Umbrella", "Rihanna")])
+    assert EXPORTERS["playlist"](res) == "Rihanna - Umbrella\n"
+
+
+def test_karaoke_and_other_artists_are_not_accepted_as_matches():
+    from mixscanner.platforms import _best
+    t = _t("Ni**as in Paris", "JAŸ-Z & Kanye West")
+    cands = [("Hits 1 Karaoke", "Ni**as in Paris (Originally by Jay-Z & Kanye West)", "k"),
+             ("Somebody Else", "Ni**as in Paris", "x")]
+    assert _best(t, cands) is None
+    assert _best(t, cands + [("JAY-Z", "Ni**as in Paris", "ok")])[1] == "ok"
+    assert _best(_t("Swag Surfin'", "F.L.Y. - Fast Life Yungstaz"),
+                 [("F.L.Y. (Fast Life Yungstaz)", "Swag Surfin'", "fly")])[1] == "fly"

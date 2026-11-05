@@ -180,7 +180,7 @@ def export(job_id: str, fmt: str) -> PlainTextResponse:
     if fmt not in EXPORTERS:
         raise HTTPException(400, "Format inconnu")
     media = {"csv": "text/csv", "json": "application/json", "md": "text/markdown"}.get(fmt, "text/plain")
-    filename = "playlist.txt" if fmt == "playlist" else f"tracklist.{fmt}"
+    filename = {"playlist": "playlist.txt", "review": "a-verifier.txt"}.get(fmt, f"tracklist.{fmt}")
     return PlainTextResponse(EXPORTERS[fmt](job.result), media_type=f"{media}; charset=utf-8",
                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 

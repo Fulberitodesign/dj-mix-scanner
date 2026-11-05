@@ -11,7 +11,7 @@ from .audio import SAMPLE_RATE, MixSource, default_cache_dir, extract_clip, load
 from .models import Hit, Match, Track, fmt_time
 from .platforms import PlatformChecker
 from .recognizers import Recognizer, get_recognizer
-from .tracklist import build_tracklist, merge_with_description, parse_description
+from .tracklist import build_tracklist, merge_with_description, parse_description, use_match
 
 
 @dataclass
@@ -180,6 +180,25 @@ async def recognize_windows(
     return hits
 
 
+async def pick_most_popular(tracks: list[Track], checker: PlatformChecker) -> None:
+    """Quand Shazam hésite entre plusieurs versions détectées une fois chacune (original / reprise),
+    on garde la plus écoutée sur Deezer : c'est presque toujours celle que le DJ a jouée."""
+    for t in tracks:
+        if not t.ambiguous:
+            continue
+        candidates = [None, *t.alternatives]  # None = détection actuellement retenue
+        scores = []
+        for c in candidates:
+            artist, title = (t.artist, t.title) if c is None else (c.artist, c.title)
+            try:
+                scores.append(await checker.deezer_popularity(artist, title))
+            except Exception:
+                scores.append(-1)
+        best = max(range(len(candidates)), key=lambda i: scores[i])
+        if candidates[best] is not None and scores[best] > scores[0]:
+            use_match(t, candidates[best])
+
+
 async def _close(obj: Any) -> None:
     close = getattr(obj, "aclose", None)
     if close:
@@ -229,6 +248,8 @@ async def scan(
         checker = checker or PlatformChecker()
         sem = asyncio.Semaphore(3)
         done = 0
+        await pick_most_popular(tracks, checker)
+        on_event("tracklist", {"tracks": tracks})
 
         async def check(t: Track) -> None:
             nonlocal done

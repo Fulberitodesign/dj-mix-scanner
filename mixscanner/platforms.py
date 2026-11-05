@@ -14,13 +14,14 @@ import base64
 import os
 import re
 import time
+from difflib import SequenceMatcher
 from typing import Any
 from urllib.parse import parse_qs, quote_plus, urlencode, urlsplit
 
 import httpx
 
 from .classify import core_title, same_version
-from .models import PlatformResult, Track, normalize
+from .models import PlatformResult, Track, main_artist, normalize
 from .throttle import Throttle
 from .tracklist import similarity
 
@@ -32,9 +33,7 @@ def _query(t: Track) -> str:
     return f"{t.artist} {t.title}".strip()
 
 
-def _main_artist(artist: str) -> str:
-    return re.split(r"\s*(?:,|&|\bfeat\.?|\bft\.?|\bfeaturing\b|\bx\b|\bvs\.?|\band\b)\s*", artist or "", maxsplit=1,
-                    flags=re.I)[0].strip()
+_main_artist = main_artist  # ancien nom
 
 
 def _queries(t: Track) -> list[str]:
@@ -68,17 +67,42 @@ def _clean_apple_url(url: str) -> str:
     return parts._replace(query=urlencode(keep)).geturl()
 
 
+_JUNK = re.compile(r"karaok|tribute|originally (?:performed |recorded )?by|made famous|in the style of|"
+                   r"backing track|cover version|lullaby|8[ -]?bit|music box", re.I)
+
+
+def artist_match(a: str, b: str) -> float:
+    """Ressemblance entre deux crédits d'artistes (1.0 si l'artiste principal de l'un figure dans l'autre)."""
+    na, nb = normalize(a), normalize(b)
+    if not na or not nb:
+        return 1.0
+    ma, mb = normalize(main_artist(a)), normalize(main_artist(b))
+    if (ma and ma in nb) or (mb and mb in na):
+        return 1.0
+    return max(SequenceMatcher(None, na, nb).ratio(), SequenceMatcher(None, ma, mb).ratio())
+
+
 def _best(track: Track, candidates: list[tuple[str, str, str]]) -> tuple[str, str, float] | None:
-    """candidates: (artist, title, url) -> meilleur (titre affiché, url, score)."""
+    """candidates: (artist, title, url) -> meilleur (titre affiché, url, score).
+
+    Un titre identique ne suffit pas : l'artiste doit aussi correspondre, et les karaokés / tributes /
+    reprises (« Hits 1 Karaoke - Ni**as in Paris (Originally by Jay-Z) ») sont écartés."""
     best = None
+    own_junk = bool(_JUNK.search(f"{track.artist} {track.title}"))
     for artist, title, url in candidates:
-        score = similarity(track.artist, track.title, artist, title)
+        if not own_junk and _JUNK.search(f"{artist} {title}"):
+            continue
+        forms = [(artist, title)]
         # un titre de vidéo YouTube contient souvent "Artiste - Titre" : on teste aussi cette forme
         if not artist and " - " in title:
             a, _, ti = title.partition(" - ")
-            score = max(score, similarity(track.artist, track.title, a, ti))
-        if best is None or score > best[2]:
-            best = (f"{artist} - {title}" if artist else title, url, score)
+            forms.append((a, ti))
+        for a, ti in forms:
+            if a and track.artist and artist_match(track.artist, a) < 0.5:
+                continue
+            score = similarity(track.artist, track.title, a, ti)
+            if best is None or score > best[2]:
+                best = (f"{artist} - {title}" if artist else title, url, score)
     return best if best and best[2] >= MATCH_THRESHOLD else None
 
 
@@ -185,6 +209,18 @@ class PlatformChecker:
                 res.isrc = next((it.get("isrc") for it in items if it["link"] == found[1]), None)
                 return res
         return PlatformResult("deezer", "not_found", search_url=surl)
+
+    async def deezer_popularity(self, artist: str, title: str) -> int:
+        """Popularité (« rank » Deezer) du morceau, 0 s'il est introuvable : sert à départager l'original
+        d'une reprise quand Shazam hésite entre les deux."""
+        probe = Track(index=0, start=0, end=0, title=title, artist=artist, version=None)  # type: ignore[arg-type]
+        for q in _queries(probe)[:2]:
+            j = await self._get_json("https://api.deezer.com/search", params={"q": q}, throttle=self._deezer)
+            items = j.get("data", [])
+            found = _best(probe, [(it["artist"]["name"], it["title"], it["link"]) for it in items])
+            if found:
+                return next((int(it.get("rank") or 0) for it in items if it["link"] == found[1]), 0)
+        return 0
 
     # --- Apple Music / iTunes (API publique, sans clé) ---
     async def apple_music(self, t: Track) -> PlatformResult:

@@ -46,6 +46,10 @@
   .tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
   .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
   .tag.kind { border-color: var(--accent); color: var(--accent); }
+  .tag.review { border-color: var(--warn); color: var(--warn); }
+  .alt { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  #review { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 8px; }
+  #review ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
   .plats { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
   .plat { font-size: 12px; padding: 3px 8px; border-radius: 6px; text-decoration: none;
     border: 1px solid var(--line); color: var(--text); }
@@ -111,7 +115,7 @@
     </div>
   </div>
   <ol id="list"></ol>
-  <p class="legend" id="legend" hidden>Vert : disponible (même version) · Orange : trouvé mais autre version · Rouge : introuvable · Gris : lien de recherche non vérifié</p>
+  <p class="legend" id="legend" hidden>Vert : disponible (même version) · Orange : trouvé mais autre version · Rouge : introuvable · Gris : lien de recherche non vérifié · ⚠️ à vérifier : Shazam a hésité entre plusieurs versions, ou le morceau n'existe ni sur Deezer ni sur Apple Music (reprise, inédit ou erreur de reconnaissance)</p>
 
   <section id="playlist" hidden>
     <h2>🎵 Créer une playlist Spotify</h2>
@@ -121,6 +125,11 @@
       <li>Ouvrez TuneMyMusic (ou Spotlistr), collez la liste, connectez votre compte Spotify : la playlist est créée.</li>
     </ol>
     <textarea id="pl-text" readonly></textarea>
+    <div id="review" hidden>
+      <strong>⚠️ <span id="review-count"></span> à vérifier</strong> — Shazam a peut-être reconnu une reprise
+      ou un remake au lieu du morceau joué. Écoutez ces passages et corrigez la liste si besoin avant de la coller :
+      <ul id="review-list"></ul>
+    </div>
     <div class="row">
       <button class="primary" id="pl-copy" type="button">📋 Copier la liste</button>
       <a class="btn" href="https://www.tunemymusic.com/fr/transfer" target="_blank" rel="noopener">TuneMyMusic</a>
@@ -227,6 +236,13 @@ async function showPlaylist(id) {
   const n = text.trim() ? text.trim().split("\n").length : 0;
   if (!n) return;
   $("pl-text").value = text;
+  const job = await (await fetch(`/api/jobs/${id}`)).json();
+  const doubtful = job.tracks.filter((t) => t.needs_review);
+  $("review").hidden = !doubtful.length;
+  $("review-count").textContent = plural(doubtful.length, "morceau", "morceaux");
+  $("review-list").innerHTML = doubtful.map((t) => `<li>${esc(t.start_str)} — ${esc(t.artist)} - ${esc(t.title)}`
+    + (t.alternatives.length ? ` <em>(ou : ${t.alternatives.map((a) => esc(a.artist + " - " + a.title)).join(" / ")})</em>` : "")
+    + "</li>").join("");
   $("pl-copy").textContent = `📋 Copier la liste (${plural(n, "morceau", "morceaux")})`;
   $("pl-dl").href = `/api/jobs/${id}/export.playlist`;
   $("pl-oauth").href = `/spotify/login?job=${id}`;
@@ -286,6 +302,7 @@ function trackHTML(t, ytid) {
   if (t.source === "description") tags.push(`<span class="tag">d'après la description</span>`);
   if (t.source === "audio+description") tags.push(`<span class="tag">confirmé par la description</span>`);
   if (t.source !== "description") tags.push(`<span class="tag">confiance ${t.confidence === "high" ? "élevée" : t.confidence === "medium" ? "moyenne" : "faible"}</span>`);
+  if (t.needs_review) tags.push(`<span class="tag review">⚠️ à vérifier</span>`);
   if (t.label) tags.push(`<span class="tag">${esc(t.label)}</span>`);
   if (t.year) tags.push(`<span class="tag">${esc(t.year)}</span>`);
   const plats = t.availability.map((p) => {
@@ -299,7 +316,8 @@ function trackHTML(t, ytid) {
   const cover = t.cover ? `<img class="cover" src="${esc(t.cover)}" alt="" loading="lazy">` : `<div class="cover"></div>`;
   return `<li class="track"><div class="time">${time}</div>${cover}<div>
     <div class="title">${esc(t.title)}</div><div class="artist">${esc(t.artist)}</div>
-    <div class="tags">${tags.join("")}</div>${plats ? `<div class="plats">${plats}</div>` : ""}</div></li>`;
+    <div class="tags">${tags.join("")}</div>${t.alternatives.length
+      ? `<div class="alt">Autre détection : ${t.alternatives.map((a) => esc(a.artist + " - " + a.title)).join(" / ")}</div>` : ""}${plats ? `<div class="plats">${plats}</div>` : ""}</div></li>`;
 }
 </script>
 </body>

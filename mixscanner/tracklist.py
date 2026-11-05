@@ -3,7 +3,7 @@ et lecture d'une éventuelle tracklist dans la description / les chapitres YouTu
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 
 from .classify import classify, core_title
@@ -17,6 +17,39 @@ class _Run:
     first: float
     last: float
     count: int
+    alternatives: list[Match] = field(default_factory=list)
+
+
+_ARTICLES = re.compile(r"^(?:the|a|an|la|le|les|el|los|las|l)\s+")
+
+
+def _title_core(title: str) -> str:
+    return _ARTICLES.sub("", core_title(title))
+
+
+def same_song_title(a: str, b: str, threshold: float = 0.85) -> bool:
+    """« The Box » / « A Box », « Taki Taki » / « Taki Tanki (feat. …) », « Last Last » / « Last Last (Afro Dancehall) »."""
+    ta, tb = _title_core(a), _title_core(b)
+    return bool(ta and tb) and SequenceMatcher(None, ta, tb).ratio() >= threshold
+
+
+def _merge_lookalikes(runs: list[_Run], gap: float) -> list[_Run]:
+    """Deux détections voisines au titre presque identique mais d'artistes différents sont presque
+    toujours le même passage : Shazam hésite entre l'original et une reprise / un remake / un remix.
+    On n'en garde qu'une (la plus détectée) et l'autre est conservée comme « autre détection »."""
+    out: list[_Run] = []
+    for r in runs:
+        prev = out[-1] if out else None
+        if (prev and prev.key != r.key and r.first - prev.last <= gap and min(prev.count, r.count) == 1
+                and same_song_title(prev.match.title, r.match.title)):
+            keep, other = (prev, r) if prev.count >= r.count else (r, prev)
+            keep.alternatives = [*keep.alternatives, other.match, *other.alternatives]
+            keep.first, keep.last = min(prev.first, r.first), max(prev.last, r.last)
+            keep.count = prev.count + r.count
+            out[-1] = keep
+        else:
+            out.append(r)
+    return out
 
 
 def build_tracklist(
@@ -59,6 +92,7 @@ def build_tracklist(
                 changed = True
                 break
 
+    runs = _merge_lookalikes(runs, gap=min(max_gap, 90.0))
     runs = [r for r in runs if r.count >= min_hits]
 
     tracks: list[Track] = []
@@ -72,10 +106,24 @@ def build_tracklist(
         tracks.append(Track(
             index=i + 1, start=r.first, end=max(end, r.first), title=m.title, artist=m.artist,
             version=classify(m.title, m.artist), hits=r.count,
-            confidence="high" if r.count >= 3 else "medium" if r.count == 2 else "low",
+            confidence=_confidence(r.count - len(r.alternatives)),
             isrc=m.isrc, album=m.album, label=m.label, year=m.year, cover=m.cover, links=dict(m.links),
+            alternatives=list(r.alternatives),
         ))
     return tracks
+
+
+def _confidence(hits: int) -> str:
+    return "high" if hits >= 3 else "medium" if hits == 2 else "low"
+
+
+def use_match(t: Track, m: Match) -> None:
+    """Remplace la détection retenue pour un morceau par une autre (garde l'ancienne en alternative)."""
+    current = Match(title=t.title, artist=t.artist, provider="shazam", isrc=t.isrc, album=t.album,
+                    label=t.label, year=t.year, cover=t.cover, links=dict(t.links))
+    t.alternatives = [current, *(a for a in t.alternatives if a is not m)]
+    t.title, t.artist, t.version = m.title, m.artist, classify(m.title, m.artist)
+    t.isrc, t.album, t.label, t.year, t.cover, t.links = m.isrc, m.album, m.label, m.year, m.cover, dict(m.links)
 
 
 def _enrich(target: Match, other: Match) -> None:
