@@ -47,6 +47,13 @@ def explain_download_error(message: str) -> str:
     if "could not copy" in low and "cookie" in low or "cookies" in low and ("permission" in low or "keyring" in low):
         return ("Impossible de lire les cookies du navigateur. Fermez le navigateur et réessayez ; pour Safari, "
                 "autorisez le Terminal dans Réglages Système → Confidentialité → Accès complet au disque.")
+    if "[audiomack]" in low:
+        return ("Audiomack n'est pas pris en charge pour l'instant : le site a fermé l'accès utilisé pour "
+                "télécharger les mix. Si l'artiste autorise le téléchargement sur Audiomack, téléchargez le mix "
+                "puis analysez le fichier audio ; sinon cherchez le même mix sur YouTube ou SoundCloud.")
+    if "[mixcloud]" in low and ("403" in low or "forbidden" in low):
+        return ("Mixcloud a refusé le téléchargement (protection anti-robots). Réessayez plus tard, ou cherchez "
+                "le même mix sur YouTube ou SoundCloud.")
     if "private video" in low or "vidéo privée" in low:
         return "Cette vidéo est privée."
     if "unsupported url" in low:

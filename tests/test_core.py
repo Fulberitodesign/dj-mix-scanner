@@ -653,6 +653,8 @@ def test_download_errors_are_explained():
     from mixscanner.audio import explain_download_error
     msg = explain_download_error("ERROR: [youtube] abc: Sign in to confirm you’re not a bot. Use --cookies")
     assert "Cookies YouTube" in msg
+    assert "Audiomack" in explain_download_error("ERROR: [audiomack] a/b: Failed to parse JSON")
+    assert "Mixcloud" in explain_download_error("ERROR: [mixcloud] x: Unable to download JSON metadata: HTTP Error 403: Forbidden")
     assert "pas installé" in explain_download_error('ERROR: could not find chrome cookies database in "/x"')
 
 
