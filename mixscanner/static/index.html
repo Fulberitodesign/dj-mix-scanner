@@ -159,7 +159,7 @@
     </div>
     <div id="pl-direct" hidden>
       <p><strong>Connexion directe :</strong> l'outil crée la playlist lui-même sur votre compte (app Spotify avec Web API requise).</p>
-      <div class="row"><a class="btn spotify" id="pl-oauth">Créer la playlist sur mon compte Spotify</a></div>
+      <div class="row"><a class="btn spotify" id="pl-oauth" target="_blank" rel="noopener">Créer la playlist sur mon compte Spotify</a></div>
     </div>
   </section>
 </main>
@@ -247,23 +247,44 @@ async function showPlaylist(id) {
     + (t.alternatives.length ? ` <em>(ou : ${t.alternatives.map((a) => esc(a.artist + " - " + a.title)).join(" / ")})</em>` : "")
     + "</li>").join("");
   $("pl-copy").textContent = `📋 Copier la liste (${plural(n, "morceau", "morceaux")})`;
-  $("pl-dl").href = `/api/jobs/${id}/export.playlist`;
+  exportLink($("pl-dl"), id, "playlist");
   $("pl-oauth").href = `/spotify/login?job=${id}`;
   try { $("pl-direct").hidden = !(await (await fetch("/api/spotify/config")).json()).oauth; } catch (e) {}
   $("playlist").hidden = false;
 }
 
+// Fenêtre de l'app Mac : fonctions fournies par l'app (presse-papiers, « Enregistrer sous »).
+const desktop = () => (window.pywebview && window.pywebview.api) || null;
+
 async function copyFrom(textareaId, button, doneText) {
   const ta = $(textareaId);
-  try { await navigator.clipboard.writeText(ta.value); }
-  catch (e) { ta.focus(); ta.select(); document.execCommand("copy"); }
-  button.textContent = doneText;
+  let ok = false;
+  if (desktop()) { try { ok = await desktop().copy(ta.value); } catch (e) {} }
+  if (!ok) {
+    try { await navigator.clipboard.writeText(ta.value); ok = true; }
+    catch (e) { ta.focus(); ta.select(); ok = document.execCommand("copy"); }
+  }
+  button.textContent = ok ? doneText : "⚠️ Copie impossible : sélectionnez le texte puis Cmd + C";
+}
+
+// Exports : dans la fenêtre de l'app, boîte « Enregistrer sous » de macOS au lieu d'un téléchargement.
+function exportLink(el, id, fmt) {
+  el.href = `/api/jobs/${id}/export.${fmt}`;
+  el.onclick = async (e) => {
+    if (!desktop()) return;  // navigateur : téléchargement normal
+    e.preventDefault();
+    try {
+      const path = await desktop().save_export(id, fmt);
+      if (path) $("status").textContent = `💾 Enregistré : ${path}`;
+    } catch (err) { $("status").innerHTML = `<span class="err">Enregistrement impossible : ${esc(err.message || err)}</span>`; }
+  };
 }
 $("pl-copy").addEventListener("click", (e) => copyFrom("pl-text", e.currentTarget, "✅ Copié !"));
 $("sl-copy").addEventListener("click", (e) =>
   copyFrom("sl-text", e.currentTarget, "✅ Copié ! Collez-les (Cmd + V) dans une playlist de l'app Spotify"));
 
-fetch("/api/app").then((r) => r.json()).then((info) => { $("quit").hidden = !info.app; }).catch(() => {});
+// Dans la fenêtre de l'app Mac, on quitte avec Cmd + Q : le bouton ne sert qu'en mode navigateur.
+fetch("/api/app").then((r) => r.json()).then((info) => { $("quit").hidden = !info.app || info.window; }).catch(() => {});
 $("quit").addEventListener("click", async () => {
   if (!confirm("Arrêter Mix Scanner ? Les analyses en cours seront interrompues (elles reprendront au prochain lancement).")) return;
   try { await fetch("/api/quit", { method: "POST" }); } catch (e) {}
@@ -281,7 +302,7 @@ async function poll(id) {
     $("go").disabled = false;
     $("status").textContent = `Terminé : ${plural(job.tracks.length, "morceau identifié", "morceaux identifiés")}.`;
     $("prog").style.width = "100%";
-    for (const f of ["txt", "csv", "md", "json"]) $(`x-${f}`).href = `/api/jobs/${id}/export.${f}`;
+    for (const f of ["txt", "csv", "md", "json"]) exportLink($(`x-${f}`), id, f);
     $("exports").hidden = false;
     showPlaylist(id);
     return;

@@ -25,7 +25,8 @@ La façon la plus simple : téléchargez le DMG sur la page
 Applications. Rien d'autre à installer (Python, ffmpeg et le module YouTube sont inclus), macOS 11 minimum.
 La première ouverture demande une autorisation : voir `LISEZ-MOI.txt` dans le DMG.
 
-L'app ouvre l'interface dans le navigateur ; le bouton « Quitter » en haut de la page l'arrête.
+L'app s'ouvre dans sa propre fenêtre (moteur WebKit de macOS) : les liens externes s'ouvrent dans le
+navigateur, les exports passent par « Enregistrer sous », Cmd + Q quitte.
 Les DMG sont reconstruits automatiquement par GitHub Actions (`.github/workflows/macos-app.yml`) ;
 pour les construire soi-même sur un Mac : `packaging/macos/build.sh`.
 

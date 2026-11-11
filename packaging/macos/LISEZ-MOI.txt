@@ -11,9 +11,10 @@ MIX SCANNER — INSTALLATION
        xattr -cr "/Applications/Mix Scanner.app"
      puis ouvrez-la de nouveau.
 
-3. La page de Mix Scanner s'ouvre dans votre navigateur (http://127.0.0.1:8000).
-   L'app n'a pas d'icône dans le Dock : pour l'arrêter, cliquez « Quitter » en haut de la page.
-   Elle s'arrête aussi toute seule après 2 heures sans utilisation.
-   Rouvrir l'app rouvre simplement la page.
+3. Mix Scanner s'ouvre dans sa propre fenêtre. Collez le lien d'un mix et cliquez « Analyser ».
+   - Les liens (Spotify, Deezer, YouTube, TuneMyMusic…) s'ouvrent dans votre navigateur.
+   - Les exports (Texte, CSV, Markdown, JSON, playlist) ouvrent la fenêtre « Enregistrer sous ».
+   - Pour quitter : Cmd + Q, ou fermez la fenêtre. Une analyse interrompue reprend où elle
+     s'était arrêtée au prochain lancement.
 
 Journal en cas de problème : ~/Library/Logs/MixScanner.log

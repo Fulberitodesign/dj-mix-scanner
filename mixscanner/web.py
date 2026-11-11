@@ -53,7 +53,8 @@ async def _track_activity(request: Request, call_next):
 @app.get("/api/app")
 def app_info() -> dict[str, Any]:
     from . import __version__
-    return {"app": os.environ.get("MIXSCANNER_APP") == "1", "version": __version__}
+    return {"app": os.environ.get("MIXSCANNER_APP") == "1", "window": os.environ.get("MIXSCANNER_WINDOW") == "1",
+            "version": __version__}
 
 
 @app.post("/api/quit")

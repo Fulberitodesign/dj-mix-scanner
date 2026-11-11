@@ -751,5 +751,7 @@ def test_quit_only_available_in_mac_app(monkeypatch):
     stopped = []
     monkeypatch.setattr(web, "_quit_callbacks", [lambda: stopped.append(1)])
     assert client.get("/api/app").json()["app"] is True
+    monkeypatch.setenv("MIXSCANNER_WINDOW", "1")
+    assert client.get("/api/app").json()["window"] is True
     assert client.post("/api/quit").status_code == 200 and stopped == [1]
     assert web.idle_seconds() < 5
