@@ -19,10 +19,12 @@ SoundCloud, Deezer, Apple Music, YouTube** (+ liens de recherche Beatport et Goo
 
 ## Application Mac (DMG)
 
-La façon la plus simple : téléchargez le DMG sur la page
-[Releases → « Mix Scanner pour Mac »](https://github.com/Fulberitodesign/dj-mix-scanner/releases/tag/mac-app)
-(**AppleSilicon** pour les Mac M1/M2/M3/M4, **Intel** sinon), ouvrez-le et glissez « Mix Scanner » dans
-Applications. Rien d'autre à installer (Python, ffmpeg et le module YouTube sont inclus), macOS 11 minimum.
+La façon la plus simple : téléchargez le DMG de votre Mac —
+[**Apple Silicon** (M1/M2/M3/M4)](https://github.com/Fulberitodesign/dj-mix-scanner/releases/download/mac-app/MixScanner-AppleSilicon.dmg)
+ou [**Intel**](https://github.com/Fulberitodesign/dj-mix-scanner/releases/download/mac-app/MixScanner-Intel.dmg)
+(page [Releases](https://github.com/Fulberitodesign/dj-mix-scanner/releases/tag/mac-app)) — ouvrez-le et glissez
+« Mix Scanner » dans Applications. Ensuite, les nouvelles versions s'installent depuis l'app : un bandeau
+« Mettre à jour » apparaît au démarrage quand il y en a une. Rien d'autre à installer (Python, ffmpeg et le module YouTube sont inclus), macOS 11 minimum.
 La première ouverture demande une autorisation : voir `LISEZ-MOI.txt` dans le DMG.
 
 L'app s'ouvre dans sa propre fenêtre (moteur WebKit de macOS) : les liens externes s'ouvrent dans le

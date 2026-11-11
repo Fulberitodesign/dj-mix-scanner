@@ -2,7 +2,7 @@ name: Application Mac (DMG)
 
 on:
   push:
-    branches: [main, corrections-fonctionnement]
+    branches: [main]
     paths: ["mixscanner/**", "packaging/**", "requirements.txt", ".github/workflows/macos-app.yml"]
   workflow_dispatch:
 
@@ -61,12 +61,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          # Copies au nom fixe : liens de téléchargement permanents, quelle que soit la version.
+          for f in dmg/MixScanner-*-AppleSilicon.dmg; do cp "$f" dmg/MixScanner-AppleSilicon.dmg; done
+          for f in dmg/MixScanner-*-Intel.dmg; do cp "$f" dmg/MixScanner-Intel.dmg; done
           gh release delete mac-app --cleanup-tag --yes || true
           gh release create mac-app dmg/*.dmg --target "${{ github.sha }}" --prerelease \
             --title "Mix Scanner pour Mac" \
             --notes "Application Mac prête à installer (branche ${{ github.ref_name }}, commit ${GITHUB_SHA::7}).
 
-          - **MixScanner-…-AppleSilicon.dmg** : Mac M1, M2, M3, M4 (menu  → À propos de ce Mac → « Puce Apple »)
-          - **MixScanner-…-Intel.dmg** : Mac avec processeur Intel
+          - **MixScanner-AppleSilicon.dmg** : Mac M1, M2, M3, M4 (menu  → À propos de ce Mac → « Puce Apple »)
+          - **MixScanner-Intel.dmg** : Mac avec processeur Intel
+
+          Déjà installé ? Ouvrez Mix Scanner : le bandeau « Mettre à jour » installe cette version.
 
           Ouvrez le DMG, glissez Mix Scanner dans Applications, puis lisez LISEZ-MOI.txt pour la première ouverture (macOS 11 ou plus récent)."
