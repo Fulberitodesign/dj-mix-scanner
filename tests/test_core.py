@@ -914,3 +914,35 @@ def test_shazam_rate_limit_slows_down_without_failing_windows(mix_file, tmp_path
     assert warnings == [] and res.recognized_windows == res.windows == 3
     assert rec._throttle.interval > 0.01  # a ralenti après la saturation…
     assert rec._penalty == 0.0           # …et repris normalement ensuite
+
+
+def test_new_app_stops_an_old_mix_scanner_left_running(monkeypatch):
+    """La toute première version tournait en arrière-plan : la nouvelle app doit l'arrêter au lieu
+    d'afficher ses pages (sinon on voit l'ancienne interface)."""
+    import threading
+    import time
+    import uvicorn
+    from mixscanner import app as desktop, web
+
+    monkeypatch.setenv("MIXSCANNER_APP", "1")
+    port = desktop._free_port()
+    server = uvicorn.Server(uvicorn.Config(web.app, host="127.0.0.1", port=port, log_config=None))
+    monkeypatch.setattr(web, "_quit_callbacks", [lambda: setattr(server, "should_exit", True)])
+    threading.Thread(target=server.run, daemon=True).start()
+    for _ in range(100):
+        if server.started:
+            break
+        time.sleep(0.05)
+    assert not desktop._port_free(port)
+    assert desktop.stop_old_server(port) is True and desktop._port_free(port)
+
+
+def test_other_programs_on_the_port_are_left_alone():
+    import socket
+    from mixscanner import app as desktop
+
+    with socket.socket() as s:  # un programme quelconque qui ne parle pas HTTP
+        s.bind(("127.0.0.1", 0))
+        s.listen()
+        port = s.getsockname()[1]
+        assert desktop.stop_old_server(port, wait=0.5) is False

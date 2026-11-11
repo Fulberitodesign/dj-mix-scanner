@@ -1,7 +1,7 @@
 """Mix Scanner : identifie les morceaux d'un mix DJ dans l'ordre chronologique."""
 import os
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 # Le Python de python.org sur macOS n'utilise pas les certificats du système :
 # sans ça, les connexions HTTPS (Shazam…) échouent avec CERTIFICATE_VERIFY_FAILED.

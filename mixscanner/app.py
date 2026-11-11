@@ -90,7 +90,33 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def stop_old_server(port: int = PORT, wait: float = 8.0) -> bool:
+    """Arrête un ancien Mix Scanner resté actif sur ce port (ex. la première version, qui tournait
+    en arrière-plan sans icône) : sinon la nouvelle app afficherait ses pages, celles d'une autre version.
+    Renvoie True si le port est libre ensuite."""
+    if _port_free(port):
+        return True
+    try:
+        with urllib.request.urlopen(f"http://{HOST}:{port}/api/app", timeout=3) as r:
+            import json
+            if "app" not in json.loads(r.read() or b"{}"):
+                return False  # autre logiciel : on n'y touche pas
+        req = urllib.request.Request(f"http://{HOST}:{port}/api/quit", data=b"", method="POST")
+        urllib.request.urlopen(req, timeout=3).close()
+        logging.info("Ancien Mix Scanner arrêté sur le port %d", port)
+    except Exception:
+        logging.info("Port %d occupé par un autre programme", port)
+        return False
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        if _port_free(port):
+            return True
+        time.sleep(0.2)
+    return _port_free(port)
+
+
 def _choose_port() -> int:
+    stop_old_server(PORT)
     port = PORT if _port_free(PORT) else _free_port()
     if port != PORT:
         os.environ.setdefault("SPOTIFY_REDIRECT_URI", f"http://{HOST}:{port}/callback")
@@ -201,11 +227,9 @@ def run_window(selftest: bool = False) -> int:
 
     os.environ["MIXSCANNER_WINDOW"] = "1"
     server = thread = None
-    if _already_running(PORT):  # une autre instance (ou la ligne de commande) sert déjà l'interface
-        port = PORT
-    else:
-        port = _choose_port()
-        server, thread = _start_server_thread(port)
+    # Toujours notre propre serveur : en réutiliser un déjà lancé afficherait une autre version.
+    port = _choose_port()
+    server, thread = _start_server_thread(port)
     url = f"http://{HOST}:{port}"
     api = DesktopApi(url)
     window = _create_window(url, api)
@@ -267,9 +291,6 @@ def _window_selftest(window, api: DesktopApi, result: dict) -> None:
 def run_browser() -> int:
     from . import web
 
-    if _already_running(PORT):  # l'app tourne déjà : on rouvre juste la page
-        webbrowser.open(f"http://{HOST}:{PORT}")
-        return 0
     port = _choose_port()
     server = _make_server(port)
     web.on_quit(lambda: setattr(server, "should_exit", True))

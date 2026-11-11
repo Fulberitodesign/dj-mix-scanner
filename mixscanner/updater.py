@@ -243,8 +243,11 @@ class Manager:
         self.on_ready: Callable[[], None] = lambda: None
 
     def snapshot(self) -> dict:
+        bundle = current_bundle() if enabled() else None
         with self.lock:
-            return {**self.state, "current": {**build_info(), "version": __version__}, "page": RELEASE_PAGE}
+            return {**self.state, "current": {**build_info(), "version": __version__}, "page": RELEASE_PAGE,
+                    # lancée depuis le DMG (lecture seule) : les mises à jour ne pourraient pas s'installer
+                    "from_dmg": bool(bundle and str(bundle).startswith("/Volumes/"))}
 
     def _set(self, **kw) -> None:
         with self.lock:

@@ -380,6 +380,11 @@ async function checkUpdate() {
     restarting: "✅ Mise à jour installée : Mix Scanner redémarre…",
     error: `⚠️ La mise à jour a échoué : ${u.error || "erreur inconnue"}`,
   };
+  if (u.from_dmg && !["downloading", "installing", "restarting"].includes(u.status)) {
+    msgs[u.status] = "📦 Mix Scanner est ouvert depuis le fichier DMG : glissez-le dans le dossier Applications, "
+      + "éjectez le DMG puis ouvrez-le depuis Applications (sinon les mises à jour ne pourront pas s'installer).";
+    go.hidden = true;
+  }
   box.hidden = !msgs[u.status];
   text.textContent = msgs[u.status] || "";
   if (UPDATE_BUSY.includes(u.status)) setTimeout(checkUpdate, u.status === "checking" ? 2000 : 1000);
