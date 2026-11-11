@@ -71,7 +71,9 @@ def classify(title: str, artist: str = "") -> VersionInfo:
         # Un mashup est souvent indiqué dans le champ artiste ("A vs B").
         if found_in_part or (kind == "mashup" and re.search(pattern, whole, re.I)):
             label = found_in_part or ""
-            if normalize(label) in (kind, normalize(KIND_LABELS_FR.get(kind, "")), "rmx"):
+            # « Medusa (Remix) », « Pop, Lock & Drop It (Acappella) » : le libellé ne dit rien de plus que le type
+            if re.fullmatch(pattern + r"|" + re.escape(normalize(KIND_LABELS_FR.get(kind, ""))) + r"|rmx",
+                            normalize(label), re.I):
                 label = ""  # « Medusa (Remix) » : le libellé n'apporte rien de plus que le type
             remixer = None
             m = _REMIXER.match(label)

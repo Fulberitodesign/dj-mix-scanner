@@ -139,7 +139,8 @@ async def recognize_windows(
                 if isinstance(e, asyncio.TimeoutError):
                     failed[offset] = "délai dépassé (le service de reconnaissance ne répond pas)"
                 else:
-                    failed[offset] = f"{type(e).__name__}: {e}"
+                    # Message lisible : « RuntimeError: … » n'apporte rien à l'utilisateur.
+                    failed[offset] = str(e) if isinstance(e, RuntimeError) and str(e) else f"{type(e).__name__}: {e}"
                 cooldown_until = max(cooldown_until, loop.time() + opts.cooldown)
                 return Hit(offset, None)
 

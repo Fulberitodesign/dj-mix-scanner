@@ -44,6 +44,8 @@ def test_classify(title, artist, kind, remixer):
 
 def test_generic_label_is_not_repeated():
     assert classify("Medusa (Remix)").label == ""
+    assert classify("Pop, Lock & Drop It (Acappella)").label == ""
+    assert classify("X (Acapella)").kind == "acapella" and classify("X (A Cappella)").label == ""
     assert classify("EoO (Afro House Remix)").label == "Afro House Remix"
 
 
