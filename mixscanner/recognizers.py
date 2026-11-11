@@ -39,10 +39,18 @@ async def _with_retries(coro_factory, attempts: int = 4, base_delay: float = 2.0
 class ShazamRecognizer:
     name = "shazam"
     attempt_timeout = 10.0  # une réponse normale arrive en moins d'une seconde
+    attempts = 6
+    penalty_min, penalty_max = 5.0, 30.0  # pause commune quand Shazam limite le débit
+    max_interval = 4.0                    # espacement maximal entre deux requêtes
+    # Durée maximale d'un extrait, pauses comprises : le délai global du pipeline ne doit pas couper
+    # un extrait qui attend simplement son tour pendant que Shazam est saturé.
+    max_window_seconds = attempts * (attempt_timeout + penalty_max + max_interval) + 30
 
     def __init__(self, interval: float = 1.0) -> None:
         # Shazam répond en ~0,3 s mais bloque (« RateLimited ») si on enchaîne plusieurs requêtes par
         # seconde : on les espace d'environ 1 s, ce qui reste rapide (≈ 2 min pour un mix d'1 h).
+        # Quand il sature malgré tout, l'espacement augmente (jusqu'à 4 s) puis redescend peu à peu.
+        self._base_interval = interval
         self._throttle = Throttle(interval)
         self._penalty = 0.0
         from shazamio import Shazam
@@ -65,12 +73,14 @@ class ShazamRecognizer:
             self._shazam = Shazam()
 
     async def recognize(self, wav: bytes) -> Match | None:
-        attempts = 6
+        attempts = self.attempts
         for i in range(attempts):
             await self._throttle.wait()
             try:
                 out = await asyncio.wait_for(self._shazam.recognize(wav), self.attempt_timeout)
                 self._penalty = 0.0
+                # retour progressif au rythme normal
+                self._throttle.interval = max(self._base_interval, self._throttle.interval * 0.95)
                 return self.parse(out)
             except Exception as e:
                 limited = "ratelimit" in type(e).__name__.lower() or "rate limited" in str(e).lower()
@@ -80,8 +90,9 @@ class ShazamRecognizer:
                     raise
                 if limited:
                     # Pause commune à tous les extraits : réessayer chacun de son côté prolonge le blocage.
-                    self._penalty = min(30.0, max(5.0, self._penalty * 2))
+                    self._penalty = min(self.penalty_max, max(self.penalty_min, self._penalty * 2))
                     self._throttle.pause(self._penalty)
+                    self._throttle.interval = min(self.max_interval, self._throttle.interval * 1.5)
                 else:
                     await asyncio.sleep(2 * 2**i)
         return None

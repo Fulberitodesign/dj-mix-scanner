@@ -884,3 +884,33 @@ def test_local_file_errors_are_clear(tmp_path):
     not_audio.write_text("bonjour")
     with pytest.raises(DownloadError, match="pas un fichier audio"):
         load_source(str(not_audio), tmp_path)
+
+
+def test_shazam_rate_limit_slows_down_without_failing_windows(mix_file, tmp_path):
+    from mixscanner.recognizers import ShazamRecognizer
+
+    class RateLimited(Exception):
+        pass
+
+    class FakeShazam:
+        def __init__(self):
+            self.calls = 0
+
+        async def recognize(self, wav):
+            self.calls += 1
+            if self.calls in (2, 3):
+                raise RateLimited("rate limited the request")
+            return {"track": {"title": "Losing It", "subtitle": "FISHER", "key": "1"}}
+
+    rec = ShazamRecognizer(interval=0.01)
+    rec.penalty_min, rec.penalty_max, rec.max_interval = 0.3, 0.6, 0.05
+    rec.max_window_seconds = 30
+    rec._shazam = FakeShazam()
+    warnings = []
+    # délai global volontairement plus court que les pauses : l'extrait ne doit pas être compté en échec
+    opts = ScanOptions(step=60, clip=10, end=130, check_platforms=False, cache_dir=tmp_path, window_timeout=0.2,
+                       cooldown=0.05)
+    res = asyncio.run(scan(str(mix_file), opts, lambda s, d: s == "warning" and warnings.append(d), recognizer=rec))
+    assert warnings == [] and res.recognized_windows == res.windows == 3
+    assert rec._throttle.interval > 0.01  # a ralenti après la saturation…
+    assert rec._penalty == 0.0           # …et repris normalement ensuite

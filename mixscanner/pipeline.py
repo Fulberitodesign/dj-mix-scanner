@@ -119,6 +119,8 @@ async def recognize_windows(
 
     loop = asyncio.get_running_loop()
     cooldown_until = 0.0
+    # Un service qui gère lui-même ses pauses (Shazam) indique sa durée maximale par extrait.
+    window_timeout = max(opts.window_timeout, getattr(recognizer, "max_window_seconds", 0) or 0)
 
     async def attempt(offset: float) -> Hit:
         """Reconnaît un extrait. En cas d'échec (Shazam saturé), tous les extraits marquent
@@ -132,12 +134,12 @@ async def recognize_windows(
                 if len(wav) < MIN_CLIP_BYTES:  # fin du fichier : rien à reconnaître
                     hit = Hit(offset, None)
                 else:
-                    hit = Hit(offset, await asyncio.wait_for(recognizer.recognize(wav), opts.window_timeout))
+                    hit = Hit(offset, await asyncio.wait_for(recognizer.recognize(wav), window_timeout))
                 failed.pop(offset, None)
                 return hit
             except Exception as e:  # une fenêtre en échec ne doit pas arrêter le scan
                 if isinstance(e, asyncio.TimeoutError):
-                    failed[offset] = "délai dépassé (le service de reconnaissance ne répond pas)"
+                    failed[offset] = "délai dépassé (le service de reconnaissance est saturé) : extrait retenté à la fin"
                 else:
                     # Message lisible : « RuntimeError: … » n'apporte rien à l'utilisateur.
                     failed[offset] = str(e) if isinstance(e, RuntimeError) and str(e) else f"{type(e).__name__}: {e}"
