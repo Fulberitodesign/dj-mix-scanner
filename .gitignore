@@ -9,3 +9,4 @@ mix-scanner.zip
 build/
 dist/
 *.spec
+mixscanner/_build.py

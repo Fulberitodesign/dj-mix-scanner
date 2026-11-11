@@ -57,6 +57,30 @@ def app_info() -> dict[str, Any]:
             "version": __version__}
 
 
+# --- Mises à jour de l'app Mac --------------------------------------------------------------
+
+class InstallRequest(BaseModel):
+    force: bool = False
+
+
+@app.get("/api/update")
+def update_state() -> dict[str, Any]:
+    from .updater import MANAGER
+    return MANAGER.snapshot()
+
+
+@app.post("/api/update/install")
+def update_install(req: InstallRequest | None = None) -> dict[str, Any]:
+    from .updater import MANAGER
+    if not MANAGER.can_install():
+        raise HTTPException(400, "Aucune mise à jour à installer.")
+    if busy() and not (req and req.force):
+        raise HTTPException(409, "Une analyse est en cours : elle sera interrompue puis reprendra après la mise à jour.")
+    if not MANAGER.start_install():
+        raise HTTPException(400, "Aucune mise à jour à installer.")
+    return MANAGER.snapshot()
+
+
 @app.post("/api/quit")
 def quit_app() -> dict[str, str]:
     if os.environ.get("MIXSCANNER_APP") != "1" or not _quit_callbacks:

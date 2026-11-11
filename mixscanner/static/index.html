@@ -48,6 +48,10 @@
   .tag.kind { border-color: var(--accent); color: var(--accent); }
   .tag.review { border-color: var(--warn); color: var(--warn); }
   .alt { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  #update { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 16px; padding: 10px 14px;
+    border-radius: 10px; border: 1px solid var(--accent); background: var(--panel); }
+  #update.error { border-color: var(--ko); }
+  #update span { flex: 1 1 260px; }
   #review { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 8px; }
   #review ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
   .plats { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
@@ -79,6 +83,11 @@
   <div class="row" style="justify-content:space-between;margin:0">
     <h1>🎧 Mix Scanner</h1>
     <button id="quit" type="button" hidden title="Arrêter Mix Scanner">⏻ Quitter</button>
+  </div>
+  <div id="update" hidden>
+    <span id="update-text"></span>
+    <button class="primary" id="update-go" type="button">Mettre à jour</button>
+    <a class="btn" id="update-page" target="_blank" rel="noopener" hidden>Télécharger à la main</a>
   </div>
   <p class="sub">Collez le lien d'un mix DJ (YouTube, SoundCloud, Mixcloud…) : chaque morceau est identifié dans l'ordre, avec sa version et sa disponibilité sur les plateformes.</p>
 
@@ -162,6 +171,7 @@
       <div class="row"><a class="btn spotify" id="pl-oauth" target="_blank" rel="noopener">Créer la playlist sur mon compte Spotify</a></div>
     </div>
   </section>
+  <p class="legend" id="version"></p>
 </main>
 
 <script>
@@ -290,6 +300,45 @@ $("quit").addEventListener("click", async () => {
   try { await fetch("/api/quit", { method: "POST" }); } catch (e) {}
   document.body.innerHTML = '<main><h1>🎧 Mix Scanner est arrêté</h1><p class="sub">Vous pouvez fermer cet onglet. Pour le relancer, ouvrez l\'application Mix Scanner.</p></main>';
 });
+
+// --- Mise à jour de l'app Mac ---------------------------------------------------------
+const UPDATE_BUSY = ["checking", "downloading", "installing", "restarting"];
+async function checkUpdate() {
+  let u;
+  try { u = await (await fetch("/api/update")).json(); } catch (e) { return; }
+  const c = u.current || {};
+  if (c.version) $("version").textContent = `Mix Scanner ${c.version}` + (c.sha ? ` · version du ${(c.time || "").slice(0, 10)} (${c.sha.slice(0, 7)})` : "");
+  const box = $("update"), text = $("update-text"), go = $("update-go");
+  box.classList.toggle("error", u.status === "error");
+  $("update-page").href = u.page || "#";
+  $("update-page").hidden = u.status !== "error";
+  go.hidden = !["available", "error"].includes(u.status);
+  go.disabled = false;
+  go.textContent = u.status === "error" ? "Réessayer" : "Mettre à jour";
+  const date = u.published ? new Date(u.published).toLocaleDateString("fr-FR", { day: "numeric", month: "long" }) : "";
+  const size = u.size ? ` · ${Math.round(u.size / 1048576)} Mo` : "";
+  const msgs = {
+    available: `🎉 Une nouvelle version de Mix Scanner est disponible${date ? " (" + date + ")" : ""}${size}.`,
+    downloading: `⬇️ Téléchargement de la mise à jour… ${Math.round((u.progress || 0) * 100)} %`,
+    installing: "🔧 Installation et vérification de la nouvelle version…",
+    restarting: "✅ Mise à jour installée : Mix Scanner redémarre…",
+    error: `⚠️ La mise à jour a échoué : ${u.error || "erreur inconnue"}`,
+  };
+  box.hidden = !msgs[u.status];
+  text.textContent = msgs[u.status] || "";
+  if (UPDATE_BUSY.includes(u.status)) setTimeout(checkUpdate, u.status === "checking" ? 2000 : 1000);
+}
+$("update-go").addEventListener("click", async () => {
+  $("update-go").disabled = true;
+  let r = await fetch("/api/update/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  if (r.status === 409) {
+    const detail = (await r.json()).detail;
+    if (!confirm(detail + "\n\nMettre à jour maintenant ?")) { $("update-go").disabled = false; return; }
+    r = await fetch("/api/update/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"force": true}' });
+  }
+  checkUpdate();
+});
+checkUpdate();
 
 function fail(msg) { $("status").innerHTML = `<span class="err">Erreur : ${esc(msg)}</span>`; $("go").disabled = false; }
 

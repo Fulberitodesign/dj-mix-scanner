@@ -757,3 +757,97 @@ def test_quit_only_available_in_mac_app(monkeypatch):
     assert client.get("/api/app").json()["window"] is True
     assert client.post("/api/quit").status_code == 200 and stopped == [1]
     assert web.idle_seconds() < 5
+
+
+# --- mise à jour automatique de l'app Mac -------------------------------------------------
+
+def _release(sha="new123", published="2026-11-12T10:00:00Z"):
+    return {"target_commitish": sha, "published_at": published, "assets": [
+        {"name": "MixScanner-1.1.0-AppleSilicon.dmg", "size": 10, "browser_download_url": "https://x/as.dmg"},
+        {"name": "MixScanner-1.1.0-Intel.dmg", "size": 12, "browser_download_url": "https://x/intel.dmg"}]}
+
+
+def _gh(release):
+    return httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, json=release)))
+
+
+def test_update_check():
+    from mixscanner.updater import check
+    info = {"sha": "old456", "time": "2026-11-11T10:00:00Z", "arch": "Intel"}
+    up = check(_gh(_release()), info)
+    assert up and up.url == "https://x/intel.dmg" and up.sha == "new123"
+    assert check(_gh(_release()), {**info, "arch": "AppleSilicon"}).url == "https://x/as.dmg"
+    assert check(_gh(_release(sha="old456")), info) is None                       # déjà à jour
+    assert check(_gh(_release(published="2026-11-10T10:00:00Z")), info) is None   # Release plus ancienne
+    assert check(_gh(_release()), {"sha": None, "time": None, "arch": None}) is None  # version de développement
+
+
+def _fake_app(root: Path, ok=True, marker="") -> Path:
+    app = root / "Mix Scanner.app"
+    exe = app / "Contents" / "MacOS" / "Mix Scanner"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("#!/bin/sh\necho " + ("'AUTOTEST RÉUSSI'" if ok else "'AUTOTEST ÉCHOUÉ'; exit 1") + "\n")
+    exe.chmod(0o755)
+    if marker:
+        (app / "Contents" / marker).write_text("1")
+    return app
+
+
+def test_update_prepare_and_swap(tmp_path, monkeypatch):
+    import time
+    from mixscanner.updater import launch_swap, prepare
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    installed = _fake_app(tmp_path / "Applications", marker="ancienne")
+    dmg_content = tmp_path / "dmg"
+    _fake_app(dmg_content, marker="nouvelle")
+    staged = prepare(tmp_path / "x.dmg", installed, attach=lambda d: dmg_content, detach=lambda m: None)
+    assert (staged / "Contents" / "nouvelle").exists() and (installed / "Contents" / "ancienne").exists()
+    launch_swap(staged, installed, relaunch=False, pid=999999)
+    for _ in range(40):
+        if (installed / "Contents" / "nouvelle").exists() and not staged.exists():
+            break
+        time.sleep(0.25)
+    assert (installed / "Contents" / "nouvelle").exists() and not staged.exists()
+    assert not list((tmp_path / "Applications").glob(".*ancienne*"))  # sauvegarde supprimée
+
+
+def test_update_refuses_a_version_that_does_not_start(tmp_path):
+    from mixscanner.updater import prepare
+    installed = _fake_app(tmp_path / "Applications", marker="ancienne")
+    broken = tmp_path / "dmg"
+    _fake_app(broken, ok=False)
+    with pytest.raises(RuntimeError, match="ne démarre pas"):
+        prepare(tmp_path / "x.dmg", installed, attach=lambda d: broken, detach=lambda m: None)
+    assert (installed / "Contents" / "ancienne").exists()
+    assert not list((tmp_path / "Applications").glob(".*maj*"))
+
+
+def test_update_download_checks_size(tmp_path):
+    from mixscanner.updater import Update, download
+    up = Update(sha="s", published="", url="https://x/a.dmg", size=5, name="a.dmg")
+    good = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, content=b"12345")))
+    progress = []
+    assert download(up, tmp_path / "a.dmg", progress.append, good).read_bytes() == b"12345" and progress[-1] == 1.0
+    short = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, content=b"12")))
+    with pytest.raises(RuntimeError, match="incomplet"):
+        download(up, tmp_path / "b.dmg", client=short)
+
+
+def test_update_api(monkeypatch):
+    from fastapi.testclient import TestClient
+    from mixscanner import updater, web
+
+    client = TestClient(web.app)
+    assert client.get("/api/update").json()["status"] in ("disabled", "none")
+    assert client.post("/api/update/install", json={}).status_code == 400
+    m = updater.Manager()
+    m.state = {"status": "available"}
+    m.update = updater.Update(sha="s", published="", url="u", size=1, name="n")
+    started = []
+    monkeypatch.setattr(m, "start_install", lambda: started.append(1) or True)
+    assert m.can_install()
+    monkeypatch.setattr(updater, "MANAGER", m)
+    monkeypatch.setattr(web, "busy", lambda: True)
+    r = client.post("/api/update/install", json={})
+    assert r.status_code == 409 and "analyse" in r.json()["detail"]
+    assert client.post("/api/update/install", json={"force": True}).status_code == 200 and started == [1]

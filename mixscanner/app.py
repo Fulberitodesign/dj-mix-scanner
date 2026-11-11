@@ -178,6 +178,9 @@ def _create_window(url: str, api: DesktopApi):
     )
     api._window = window
     web.on_quit(window.destroy)
+    from .updater import MANAGER
+    MANAGER.on_ready = window.destroy  # la mise à jour est prête : on quitte, le script relance l'app
+    MANAGER.start_check()
     return window
 
 
@@ -258,6 +261,9 @@ def run_browser() -> int:
     port = _choose_port()
     server = _make_server(port)
     web.on_quit(lambda: setattr(server, "should_exit", True))
+    from .updater import MANAGER
+    MANAGER.on_ready = lambda: setattr(server, "should_exit", True)
+    MANAGER.start_check()
 
     def watchdog() -> None:  # arrêt automatique après une longue inactivité
         while not server.should_exit:

@@ -14,6 +14,13 @@ DENO=$("$PY" -c "import shutil, sysconfig, os; print(shutil.which('deno') or os.
 [ -x "$DENO" ] || { echo "deno introuvable"; exit 1; }
 
 rm -rf build dist
+# Identité de cette construction : sert à l'app pour savoir si une mise à jour existe.
+SHA=${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo "")}
+cat > mixscanner/_build.py <<PYEOF
+BUILD_SHA = "$SHA"
+BUILD_TIME = "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+ARCH = "$ARCH"
+PYEOF
 "$PY" -m PyInstaller --noconfirm --clean --windowed --name "Mix Scanner" \
   --osx-bundle-identifier com.fulberitodesign.mixscanner \
   --icon packaging/macos/icon.icns \
@@ -46,6 +53,8 @@ if [ "$(uname)" = "Darwin" ]; then
   ln -s /Applications "$STAGE/Applications"
   cp packaging/macos/LISEZ-MOI.txt "$STAGE/"
   hdiutil create -volname "Mix Scanner" -srcfolder "$STAGE" -ov -format UDZO "dist/MixScanner-$VERSION-$ARCH.dmg"
+  # Vérifie la mise à jour automatique sur ce Mac : installe ce DMG par-dessus une copie de l'app.
+  "$APP/Contents/MacOS/Mix Scanner" --selftest-update "dist/MixScanner-$VERSION-$ARCH.dmg"
   echo "✅ dist/MixScanner-$VERSION-$ARCH.dmg"
 else
   "dist/Mix Scanner/Mix Scanner" --selftest                  # essai sous Linux (pas de .app ni de DMG)
