@@ -222,6 +222,39 @@ def start_scan(req: ScanRequest) -> dict[str, str]:
     return {"id": job.id}
 
 
+@app.post("/api/upload")
+async def upload(request: Request, name: str = "mix") -> dict[str, str]:
+    """Reçoit un fichier audio envoyé par la page (mode navigateur, ou glisser-déposer) et renvoie
+    son chemin, à analyser comme un lien. Corps de la requête = contenu brut du fichier."""
+    import hashlib
+    import tempfile
+
+    from .audio import default_cache_dir, upload_path
+
+    cache = default_cache_dir()
+    (cache / "envois").mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha1()
+    size = 0
+    with tempfile.NamedTemporaryFile(dir=cache / "envois", delete=False, suffix=".part") as tmp:
+        async for chunk in request.stream():
+            tmp.write(chunk)
+            digest.update(chunk)
+            size += len(chunk)
+            if size > 4 * 1024**3:
+                tmp.close()
+                Path(tmp.name).unlink(missing_ok=True)
+                raise HTTPException(413, "Fichier trop volumineux (4 Go maximum)")
+    if not size:
+        Path(tmp.name).unlink(missing_ok=True)
+        raise HTTPException(400, "Fichier vide")
+    dest = upload_path(cache, name, digest.hexdigest())
+    if dest.exists():  # même fichier déjà envoyé : on garde l'ancien (et le cache de son analyse)
+        Path(tmp.name).unlink(missing_ok=True)
+    else:
+        Path(tmp.name).replace(dest)
+    return {"path": str(dest)}
+
+
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict[str, Any]:
     if job_id not in JOBS:

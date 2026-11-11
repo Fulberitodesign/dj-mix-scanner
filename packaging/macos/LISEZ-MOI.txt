@@ -12,6 +12,8 @@ MIX SCANNER — INSTALLATION
      puis ouvrez-la de nouveau.
 
 3. Mix Scanner s'ouvre dans sa propre fenêtre. Collez le lien d'un mix et cliquez « Analyser ».
+   - Pour un mix enregistré sur votre Mac (ex. téléchargé sur Audiomack) : bouton « 📂 Fichier audio »
+     ou glissez le fichier sur la fenêtre.
    - Les liens (Spotify, Deezer, YouTube, TuneMyMusic…) s'ouvrent dans votre navigateur.
    - Les exports (Texte, CSV, Markdown, JSON, playlist) ouvrent la fenêtre « Enregistrer sous ».
    - Pour quitter : Cmd + Q, ou fermez la fenêtre. Une analyse interrompue reprend où elle

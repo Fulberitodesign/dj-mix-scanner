@@ -94,8 +94,8 @@ def ffmpeg_exe() -> str:
 def probe_duration(path: Path) -> float:
     out = subprocess.run([ffmpeg_exe(), "-hide_banner", "-i", str(path)], capture_output=True, text=True)
     m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", out.stderr)
-    if not m:
-        raise RuntimeError(f"Impossible de lire la durée de {path}")
+    if not m or not re.search(r"Stream #.*Audio", out.stderr):
+        raise DownloadError(f"« {path.name} » n'est pas un fichier audio lisible (MP3, M4A, WAV, FLAC, AAC, OGG…).")
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
 
 
@@ -103,6 +103,20 @@ def _local_cache_id(path: Path) -> str:
     st = path.stat()
     raw = f"{path.resolve()}|{st.st_size}|{int(st.st_mtime)}"
     return "local-" + hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def _local_title(path: Path) -> str:
+    """Titre affiché pour un fichier : son nom, sans le préfixe ajouté aux fichiers envoyés."""
+    return re.sub(r"^envoi-[0-9a-f]{12}-", "", path.stem)
+
+
+UPLOAD_DIR = "envois"
+
+
+def upload_path(cache_dir: Path, filename: str, digest: str) -> Path:
+    """Emplacement d'un fichier envoyé depuis le navigateur (nom stable : le cache des analyses reste valable)."""
+    name = re.sub(r"[^\w.\- ()\[\]&',!+#–—]+", "_", Path(filename or "mix").name)[:120] or "mix"
+    return cache_dir / UPLOAD_DIR / f"envoi-{digest[:12]}-{name}"
 
 
 def load_source(
@@ -115,8 +129,10 @@ def load_source(
     url_or_path = url_or_path.strip()
     local = Path(url_or_path).expanduser()
     if "://" not in url_or_path and local.is_file():
-        return MixSource(path=local, title=local.stem, duration=probe_duration(local),
+        return MixSource(path=local, title=_local_title(local), duration=probe_duration(local),
                          cache_id=_local_cache_id(local))
+    if "://" not in url_or_path and (url_or_path.startswith(("/", "~", "./")) or "\\" in url_or_path):
+        raise DownloadError(f"Fichier introuvable : {url_or_path}")
 
     import yt_dlp
 

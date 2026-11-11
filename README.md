@@ -41,6 +41,11 @@ pip install -r requirements.txt
 
 ## Utilisation
 
+### Analyser un fichier audio
+Bouton **📂 Fichier audio** (ou glisser-déposer le fichier sur la fenêtre) : MP3, M4A, WAV, FLAC, AAC, OGG…
+Utile pour un mix téléchargé sur Audiomack (site non pris en charge par lien) ou reçu d'un DJ.
+En ligne de commande : `python -m mixscanner mon_mix.mp3`.
+
 ### Interface web
 ```bash
 uvicorn mixscanner.web:app --port 8000

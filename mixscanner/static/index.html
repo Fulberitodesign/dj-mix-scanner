@@ -21,7 +21,7 @@
   .sub { color: var(--muted); margin: 0 0 24px; }
   form { display: flex; flex-wrap: wrap; gap: 8px; background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; padding: 12px; }
-  input[type=url] { flex: 1 1 380px; min-width: 0; padding: 10px 12px; border-radius: 8px;
+  input#url { flex: 1 1 380px; min-width: 0; padding: 10px 12px; border-radius: 8px;
     border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 15px; }
   select, button { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
     background: var(--bg); color: var(--text); font-size: 14px; }
@@ -63,6 +63,7 @@
   .plat.unverified, .plat.error { color: var(--muted); }
   .legend { color: var(--muted); font-size: 13px; margin-top: 12px; }
   .err { color: var(--ko); }
+  form.drop { outline: 2px dashed var(--accent); outline-offset: 4px; }
   #playlist { margin-top: 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
   #playlist h2 { margin: 0 0 8px; font-size: 18px; }
   #playlist p { margin: 8px 0; color: var(--muted); }
@@ -89,10 +90,13 @@
     <button class="primary" id="update-go" type="button">Mettre à jour</button>
     <a class="btn" id="update-page" target="_blank" rel="noopener" hidden>Télécharger à la main</a>
   </div>
-  <p class="sub">Collez le lien d'un mix DJ (YouTube, SoundCloud, Mixcloud…) : chaque morceau est identifié dans l'ordre, avec sa version et sa disponibilité sur les plateformes.</p>
+  <p class="sub">Collez le lien d'un mix DJ (YouTube, SoundCloud…) ou choisissez un fichier audio : chaque morceau est identifié dans l'ordre, avec sa version et sa disponibilité sur les plateformes.</p>
 
   <form id="f">
-    <input type="url" id="url" placeholder="https://www.youtube.com/watch?v=…" required>
+    <input type="text" id="url" placeholder="Lien YouTube / SoundCloud… ou glissez un fichier audio ici" required
+      autocomplete="off" spellcheck="false">
+    <button type="button" id="file" title="Analyser un mix enregistré sur ce Mac (MP3, M4A, WAV…)">📂 Fichier audio</button>
+    <input type="file" id="file-input" accept="audio/*,video/mp4,video/webm,.mp3,.m4a,.aac,.wav,.aif,.aiff,.flac,.ogg,.opus" hidden>
     <select id="step" title="Fréquence d'analyse">
       <option value="20">Précis (toutes les 20 s)</option>
       <option value="30" selected>Normal (toutes les 30 s)</option>
@@ -187,6 +191,58 @@ const STAGES = { queued: "En attente…", download: "Téléchargement de l'audio
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 let timer = null;
 const plural = (n, word, many = word + "s") => `${n} ${n > 1 ? many : word}`;
+
+// --- Fichier audio : sélecteur de macOS (app), sinon envoi du fichier à l'outil -------------
+function sendFile(file) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/upload?name=${encodeURIComponent(file.name)}`);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable) {
+        const pct = Math.round(ev.loaded / ev.total * 100);
+        $("status").textContent = `Chargement de « ${file.name} »… ${pct} %`;
+        $("prog").style.width = pct + "%";
+      }
+    };
+    xhr.onload = () => {
+      let body = {};
+      try { body = JSON.parse(xhr.responseText); } catch (e) {}
+      xhr.status === 200 ? resolve(body.path) : reject(new Error(body.detail || xhr.statusText));
+    };
+    xhr.onerror = () => reject(new Error("envoi interrompu"));
+    xhr.send(file);
+  });
+}
+async function analyseFile(file) {
+  try {
+    $("go").disabled = true;
+    $("url").value = await sendFile(file);
+    $("go").disabled = false;
+    $("f").requestSubmit();
+  } catch (err) { fail("fichier non chargé : " + err.message); }
+}
+$("file").addEventListener("click", async () => {
+  if (desktop()) {
+    const path = await desktop().choose_audio_file();
+    if (path) { $("url").value = path; $("f").requestSubmit(); }
+  } else {
+    $("file-input").click();
+  }
+});
+$("file-input").addEventListener("change", (e) => { if (e.target.files[0]) analyseFile(e.target.files[0]); e.target.value = ""; });
+// Glisser-déposer un fichier audio n'importe où dans la fenêtre
+["dragenter", "dragover"].forEach((t) => document.addEventListener(t, (e) => {
+  if ([...(e.dataTransfer?.types || [])].includes("Files")) { e.preventDefault(); $("f").classList.add("drop"); }
+}));
+["dragleave", "drop"].forEach((t) => document.addEventListener(t, () => $("f").classList.remove("drop")));
+document.addEventListener("drop", (e) => {
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  e.preventDefault();
+  if ($("go").disabled) return;  // une analyse est déjà en cours
+  analyseFile(file);
+});
 
 $("f").addEventListener("submit", async (e) => {
   e.preventDefault();

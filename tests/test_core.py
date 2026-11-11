@@ -853,3 +853,34 @@ def test_update_api(monkeypatch):
     r = client.post("/api/update/install", json={})
     assert r.status_code == 409 and "analyse" in r.json()["detail"]
     assert client.post("/api/update/install", json={"force": True}).status_code == 200 and started == [1]
+
+
+# --- analyse d'un fichier audio (Audiomack téléchargé, fichier du Mac…) ---------------------
+
+def test_upload_then_scan_local_file(mix_file, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from mixscanner import web
+    from mixscanner.audio import load_source
+
+    monkeypatch.setenv("MIXSCANNER_CACHE", str(tmp_path))
+    client = TestClient(web.app)
+    data = mix_file.read_bytes()
+    r = client.post("/api/upload?name=Mon mix DJ (Audiomack).m4a", content=data)
+    assert r.status_code == 200
+    path = Path(r.json()["path"])
+    assert path.read_bytes() == data and path.parent == tmp_path / "envois"
+    again = client.post("/api/upload?name=Mon mix DJ (Audiomack).m4a", content=data).json()["path"]
+    assert again == str(path)  # même fichier : même chemin, donc l'analyse en cache reste valable
+    src = load_source(str(path), tmp_path)
+    assert src.title == "Mon mix DJ (Audiomack)" and src.cache_id and abs(src.duration - 260) < 1
+    assert client.post("/api/upload?name=vide.mp3", content=b"").status_code == 400
+
+
+def test_local_file_errors_are_clear(tmp_path):
+    from mixscanner.audio import DownloadError, load_source
+    with pytest.raises(DownloadError, match="introuvable"):
+        load_source(str(tmp_path / "absent.mp3"), tmp_path)
+    not_audio = tmp_path / "notes.txt"
+    not_audio.write_text("bonjour")
+    with pytest.raises(DownloadError, match="pas un fichier audio"):
+        load_source(str(not_audio), tmp_path)

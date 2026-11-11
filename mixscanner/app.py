@@ -161,6 +161,18 @@ class DesktopApi:
         path.write_bytes(data)
         return str(path)
 
+    def choose_audio_file(self) -> str | None:
+        """Sélecteur de fichiers de macOS ; renvoie le chemin du fichier audio choisi."""
+        import webview
+
+        chosen = self._window.create_file_dialog(
+            webview.FileDialog.OPEN, directory=str(Path.home() / "Downloads"),
+            file_types=("Fichiers audio (*.mp3;*.m4a;*.aac;*.wav;*.aif;*.aiff;*.flac;*.ogg;*.opus;*.mp4;*.webm)",
+                        "Tous les fichiers (*.*)"))
+        if not chosen:
+            return None
+        return str(chosen if isinstance(chosen, str) else chosen[0])
+
     def open_url(self, url: str) -> bool:
         if not re.match(r"https?://", url or ""):
             return False
