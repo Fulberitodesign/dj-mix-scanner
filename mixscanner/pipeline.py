@@ -48,6 +48,13 @@ class ScanResult:
             "tracks": [t.to_dict() for t in self.tracks],
         }
 
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ScanResult":
+        stats = d.get("stats") or {}
+        return cls(source=d.get("source") or {}, tracks=[Track.from_dict(t) for t in d.get("tracks") or []],
+                   windows=int(stats.get("windows") or 0), recognized_windows=int(stats.get("recognized_windows") or 0),
+                   description_entries=int(stats.get("description_entries") or 0))
+
 
 MIN_CLIP_BYTES = 44 + SAMPLE_RATE * 2 * 2  # en-tête WAV + 2 s d'audio
 
@@ -157,7 +164,11 @@ async def recognize_windows(
             save_cache()
         on_event("recognize", {"done": done, "total": len(offsets), "hit": hit})
 
-    await asyncio.gather(*(one(o) for o in offsets))
+    try:
+        await asyncio.gather(*(one(o) for o in offsets))
+    except asyncio.CancelledError:
+        save_cache()  # analyse arrêtée : on garde ce qui est fait, la relance reprendra là
+        raise
 
     # Deuxième passage sur les extraits en échec, après une pause, un par un.
     if failed and any(h.match for h in hits):

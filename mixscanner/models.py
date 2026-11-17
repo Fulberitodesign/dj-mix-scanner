@@ -134,3 +134,15 @@ class Track:
         d["end_str"] = fmt_time(self.end)
         d["needs_review"] = self.needs_review
         return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Track":
+        """Inverse de to_dict (historique) ; ignore les champs calculés et inconnus."""
+        names = {f for f in cls.__dataclass_fields__}
+        data = {k: v for k, v in d.items() if k in names}
+        data["version"] = VersionInfo(**(d.get("version") or {"kind": "original"}))
+        data["availability"] = [PlatformResult(**{k: v for k, v in p.items() if k in PlatformResult.__dataclass_fields__})
+                                for p in d.get("availability") or []]
+        data["alternatives"] = [Match(**{k: v for k, v in m.items() if k in Match.__dataclass_fields__})
+                                for m in d.get("alternatives") or []]
+        return cls(**data)

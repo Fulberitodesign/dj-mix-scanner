@@ -6,233 +6,675 @@
 <title>Mix Scanner</title>
 <style>
   :root {
-    --bg: #f6f6f8; --panel: #fff; --text: #17171c; --muted: #6b6b76; --line: #e3e3e8;
-    --accent: #6d4aff; --ok: #138a4f; --ko: #c0392b; --warn: #b7791f;
+    --bg: #f5f4f9; --side: #eeedf4; --panel: #ffffff; --panel-2: #f7f6fb; --hover: #f2f0f9; --line: #e4e2ec;
+    --text: #17151f; --muted: #6b6780; --faint: #a29eb4; --accent: #7c4dff; --accent-soft: rgba(124, 77, 255, .10);
+    --gold: #c47f04; --gold-soft: rgba(217, 119, 6, .10); --ok: #16a34a; --ko: #dc2626;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e0d13; --side: #121119; --panel: #17161f; --panel-2: #1d1b27; --hover: #23212f; --line: #2a2837;
+    --text: #edecf3; --muted: #8e8aa1; --faint: #5f5b72; --accent: #8b5cf6; --accent-soft: rgba(139, 92, 246, .16);
+    --gold: #fbbf24; --gold-soft: rgba(251, 191, 36, .14); --ok: #34d399; --ko: #f87171;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #111114; --panel: #1b1b20; --text: #ececf1; --muted: #9a9aa6; --line: #2c2c34;
-      --accent: #9d86ff; --ok: #3ccf87; --ko: #ff6b5e; --warn: #f0b44c; }
+    :root[data-theme="auto"] {
+      --bg: #0e0d13; --side: #121119; --panel: #17161f; --panel-2: #1d1b27; --hover: #23212f; --line: #2a2837;
+      --text: #edecf3; --muted: #8e8aa1; --faint: #5f5b72; --accent: #8b5cf6; --accent-soft: rgba(139, 92, 246, .16);
+      --gold: #fbbf24; --gold-soft: rgba(251, 191, 36, .14); --ok: #34d399; --ko: #f87171;
+    }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
-  h1 { font-size: 26px; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 24px; }
-  form { display: flex; flex-wrap: wrap; gap: 8px; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; padding: 12px; }
-  input#url { flex: 1 1 380px; min-width: 0; padding: 10px 12px; border-radius: 8px;
-    border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 15px; }
-  select, button { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
-    background: var(--bg); color: var(--text); font-size: 14px; }
-  button.primary { background: var(--accent); color: #fff; border: 0; font-weight: 600; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: default; }
-  label.opt { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; }
-  #status { margin: 20px 0 8px; color: var(--muted); min-height: 1.4em; }
-  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
-  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
-  .head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;
-    margin-top: 24px; }
-  .head h2 { margin: 0; font-size: 18px; }
-  .exports a { color: var(--accent); margin-left: 12px; font-size: 14px; }
-  ol { list-style: none; padding: 0; margin: 12px 0 0; }
-  li.track { display: grid; grid-template-columns: 70px 52px 1fr; gap: 12px; align-items: start;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 8px; }
-  .time { font-variant-numeric: tabular-nums; font-weight: 600; }
-  .time a { color: var(--accent); text-decoration: none; }
-  .cover { width: 52px; height: 52px; border-radius: 6px; background: var(--line); object-fit: cover; }
-  .title { font-weight: 600; }
-  .artist { color: var(--muted); }
-  .tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
-  .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-  .tag.kind { border-color: var(--accent); color: var(--accent); }
-  .tag.review { border-color: var(--warn); color: var(--warn); }
-  .alt { color: var(--muted); font-size: 13px; margin-top: 4px; }
-  #update { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 16px; padding: 10px 14px;
-    border-radius: 10px; border: 1px solid var(--accent); background: var(--panel); }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 var(--font); -webkit-font-smoothing: antialiased; }
+  button, input, select { font: inherit; color: inherit; }
+  a { color: inherit; }
+  .app { display: grid; grid-template-columns: 232px 1fr; height: 100vh; min-height: 560px; }
+
+  /* --- barre latérale --- */
+  aside { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 18px 14px; gap: 18px; overflow: auto; }
+  .brand { display: flex; align-items: center; gap: 11px; padding: 2px 6px; }
+  .brand svg { width: 40px; height: 40px; flex: none; }
+  .brand b { display: block; font-size: 17px; letter-spacing: -.01em; }
+  .brand span { color: var(--muted); font-size: 12px; }
+  nav { display: grid; gap: 2px; }
+  nav button { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border: 0; border-radius: 10px; background: none; color: var(--muted); font-weight: 500; cursor: pointer; text-align: left; }
+  nav button:hover { background: var(--hover); color: var(--text); }
+  nav button.on { background: var(--accent-soft); color: var(--text); }
+  nav button.on svg { color: var(--accent); }
+  nav svg { width: 18px; height: 18px; flex: none; }
+  nav .count { margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  nav button.on .count { border-color: var(--accent); color: var(--accent); }
+  .side-title { color: var(--faint); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: 0 10px; margin-bottom: -10px; }
+  .recent { display: grid; gap: 2px; }
+  .recent button { display: grid; grid-template-columns: 30px 1fr; gap: 9px; align-items: center; padding: 7px 8px; border: 0; border-radius: 10px; background: none; text-align: left; cursor: pointer; }
+  .recent button:hover, .recent button.on { background: var(--hover); }
+  .recent .thumb { width: 30px; height: 30px; border-radius: 7px; }
+  .recent div:last-child { min-width: 0; }
+  .recent b { display: block; font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .recent span { font-size: 11px; color: var(--muted); }
+  .recent .none { font-size: 12px; color: var(--faint); padding: 0 10px; }
+  .side-foot { margin-top: auto; border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 12px; color: var(--muted); }
+  .side-foot b { color: var(--text); display: flex; gap: 7px; align-items: center; font-size: 12.5px; margin-bottom: 4px; }
+  .side-foot .ver { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .side-foot .ver i { font-style: normal; color: var(--ok); white-space: nowrap; }
+  .side-foot .ver i.new { color: var(--accent); cursor: pointer; }
+  #quit { margin-top: 8px; border: 0; background: none; color: var(--muted); padding: 0; cursor: pointer; font-size: 12px; }
+
+  /* --- zone principale --- */
+  main { display: flex; flex-direction: column; min-width: 0; height: 100vh; overflow: hidden; }
+  .page { flex: 1; min-height: 0; padding: 20px 22px 0; }
+  .page-scan { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+
+  #update { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 22px 0; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--accent); background: var(--panel); }
   #update.error { border-color: var(--ko); }
   #update span { flex: 1 1 260px; }
-  #review { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 8px; }
-  #review ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
-  .plats { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
-  .plat { font-size: 12px; padding: 3px 8px; border-radius: 6px; text-decoration: none;
-    border: 1px solid var(--line); color: var(--text); }
-  .plat.available { border-color: var(--ok); color: var(--ok); }
-  .plat.other { border-color: var(--warn); color: var(--warn); }
-  .plat.not_found { color: var(--ko); border-color: var(--ko); opacity: .75; }
-  .plat.unverified, .plat.error { color: var(--muted); }
-  .legend { color: var(--muted); font-size: 13px; margin-top: 12px; }
-  .err { color: var(--ko); }
-  form.drop { outline: 2px dashed var(--accent); outline-offset: 4px; }
-  #playlist { margin-top: 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
-  #playlist h2 { margin: 0 0 8px; font-size: 18px; }
-  #playlist p { margin: 8px 0; color: var(--muted); }
-  #playlist textarea { width: 100%; height: 140px; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
-    background: var(--bg); color: var(--text); font: 13px/1.4 ui-monospace, Menlo, monospace; resize: vertical; }
-  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
-  a.btn { display: inline-block; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line);
-    color: var(--text); text-decoration: none; font-size: 14px; }
-  #playlist ol.steps { list-style: decimal; margin: 4px 0 8px; padding-left: 20px; color: var(--muted); }
-  #playlist ol.steps li { margin: 2px 0; }
-  .muted { color: var(--muted); font-size: 14px; }
-  a.btn.spotify { background: #1db954; border-color: #1db954; color: #000; font-weight: 600; }
-  @media (max-width: 560px) { li.track { grid-template-columns: 56px 1fr; } .cover { display: none; } }
+
+  header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 18px; }
+  @media (max-width: 1100px) { header { grid-template-columns: 1fr; } }
+  .eyebrow { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; flex-wrap: wrap; min-height: 20px; }
+  .src-badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 11.5px; background: var(--hover); color: var(--muted); }
+  .src-badge.youtube { background: rgba(239, 68, 68, .12); color: #e11d48; }
+  .src-badge.soundcloud { background: rgba(249, 115, 22, .14); color: #ea580c; }
+  h1 { margin: 6px 0 2px; font-size: 21px; letter-spacing: -.015em; line-height: 1.25; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .sub.err { color: var(--ko); }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat { min-width: 100px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); }
+  .stat b { display: block; font-size: 22px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .stat.gold { border-color: rgba(217, 119, 6, .45); } .stat.gold b { color: var(--gold); }
+  .stat.ok b { color: var(--ok); }
+
+  /* lien + options */
+  .source { display: flex; gap: 10px; align-items: center; padding: 10px; flex-wrap: wrap; position: relative; }
+  .source.drop { outline: 2px dashed var(--accent); outline-offset: 3px; }
+  .field { flex: 1 1 360px; display: flex; align-items: center; gap: 10px; background: var(--panel-2); border: 1px dashed var(--line); border-radius: 10px; padding: 0 12px; height: 42px; min-width: 0; }
+  .field:focus-within { border-style: solid; border-color: var(--accent); }
+  .field svg { width: 17px; height: 17px; color: var(--muted); flex: none; }
+  .field input { flex: 1; min-width: 0; background: none; border: 0; outline: none; }
+  .field input::placeholder { color: var(--faint); }
+  .chip-sel { height: 42px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+  .chip-sel select { border: 0; background: none; color: var(--text); font-weight: 500; outline: none; cursor: pointer; }
+  .btn { height: 42px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; white-space: nowrap; font-weight: 500; text-decoration: none; }
+  .btn:hover { background: var(--hover); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.sm { height: 34px; padding: 0 12px; font-size: 13px; }
+  .btn svg { width: 16px; height: 16px; }
+  .pop { position: absolute; right: 10px; top: 58px; z-index: 20; width: 300px; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 14px 40px rgba(20, 16, 40, .16); display: grid; gap: 12px; }
+  .pop label, .set label { display: grid; gap: 5px; font-size: 12.5px; color: var(--muted); }
+  .pop select, .set select { height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); padding: 0 8px; }
+  .check { display: flex !important; align-items: center; gap: 8px !important; color: var(--text) !important; font-size: 13px !important; }
+  .hint { font-size: 11.5px; color: var(--faint); line-height: 1.35; }
+
+  /* progression (seulement pendant l'analyse) */
+  .progress { flex-basis: 100%; padding: 12px 4px 2px; border-top: 1px solid var(--line); margin-top: 2px; }
+  .pg-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .steps { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--faint); }
+  .steps .sep { color: var(--line); }
+  .step.done { color: var(--ok); }
+  .step.on { color: var(--text); font-weight: 600; }
+  .pg-num { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .pg-num b { color: var(--text); font-size: 15px; font-variant-numeric: tabular-nums; }
+  .pg-bar { height: 8px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; margin: 9px 0 7px; }
+  .pg-bar div { height: 100%; width: 0; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #a78bfa); position: relative; overflow: hidden; transition: width .6s ease; }
+  .pg-bar div::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .45), transparent); animation: slide 1.6s infinite; }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  .pg-foot { font-size: 12px; color: var(--faint); }
+  .pg-foot .warn { color: var(--gold); }
+
+  /* liste des morceaux */
+  .tracks { display: flex; flex-direction: column; min-height: 0; }
+  .tr-head { display: flex; align-items: center; gap: 22px; padding: 0 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .tr-tabs { display: flex; gap: 22px; }
+  .tr-tabs button { border: 0; background: none; padding: 14px 0 12px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
+  .tr-tabs button.on { color: var(--text); border-color: var(--accent); }
+  .tr-tabs .n { color: var(--faint); margin-left: 5px; font-weight: 400; }
+  .tr-tabs button.warn .n { color: var(--gold); }
+  .status { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .dot-live { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); animation: blink 1.4s infinite; }
+  .dot-done { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .dot-off { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  @keyframes blink { 50% { opacity: .3; } }
+  .search { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 0 9px; height: 30px; background: var(--panel-2); }
+  .search input { background: none; border: 0; outline: none; width: 140px; font-size: 13px; }
+  .search svg { width: 14px; height: 14px; color: var(--faint); }
+  .rows { overflow: auto; min-height: 0; padding: 6px 8px 8px; }
+  .row { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto 14px; gap: 14px; align-items: center; padding: 11px 10px; border-radius: 10px; cursor: pointer; }
+  .row + .row, .more + .row { border-top: 1px solid var(--line); }
+  .row:hover { background: var(--hover); }
+  .row.open { background: var(--hover); border-radius: 10px 10px 0 0; }
+  .row .t { font-variant-numeric: tabular-nums; color: var(--faint); font-size: 12.5px; }
+  .row .ti { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .ar { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .right { display: flex; align-items: center; gap: 10px; }
+  .kind { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .rv-pill { font-size: 11.5px; font-weight: 600; color: var(--gold); background: var(--gold-soft); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .stdot { width: 8px; height: 8px; border-radius: 50%; background: #1ed760; flex: none; }
+  .stdot.no { background: none; border: 1.5px solid var(--faint); }
+  .chev { color: var(--faint); transition: transform .15s; font-size: 13px; }
+  .row.open .chev { transform: rotate(90deg); }
+  .more { display: none; background: var(--hover); border-radius: 0 0 10px 10px; padding: 2px 10px 14px 86px; font-size: 13px; color: var(--muted); }
+  .row.open + .more { display: block; }
+  .more .links { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+  .more .links a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--line); }
+  .more .links a.other { color: var(--gold); }
+  .more .links a.srch { color: var(--muted); }
+  .more .links .no { color: var(--faint); text-decoration: line-through; }
+  .more .alt { margin-top: 10px; padding: 8px 12px; border-radius: 9px; background: var(--gold-soft); color: var(--text); display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .more .alt span { color: var(--gold); font-weight: 600; }
+  .more .acts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .link-btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 5px 11px; font-size: 12.5px; cursor: pointer; text-decoration: none; color: var(--text); }
+  .link-btn:disabled { opacity: .5; cursor: default; }
+  .pending { cursor: default; }
+  .skel { height: 10px; border-radius: 5px; background: var(--line); }
+  .empty { padding: 50px 20px; text-align: center; color: var(--muted); }
+  .empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 6px; }
+
+  /* barre du bas : playlist */
+  .dock { margin: 0 -22px; padding: 12px 22px; border-top: 1px solid var(--line); background: var(--side); display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .dock .sp-logo { width: 34px; height: 34px; border-radius: 50%; background: #1ed760; display: grid; place-items: center; flex: none; }
+  .dock .sp-logo svg { width: 20px; height: 20px; }
+  .dock .txt { min-width: 0; }
+  .dock .txt b { display: block; font-size: 14px; }
+  .dock .txt span { color: var(--muted); font-size: 12.5px; }
+  .dock .txt em { color: var(--gold); font-style: normal; }
+  .dock .acts { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; position: relative; }
+  .menu { display: none; position: absolute; right: 0; bottom: 44px; z-index: 20; min-width: 250px; padding: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 14px 40px rgba(20, 16, 40, .16); }
+  .menu.open { display: grid; }
+  .menu button { border: 0; background: none; text-align: left; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .menu button:hover { background: var(--hover); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+  .menu .h { font-size: 11px; color: var(--faint); padding: 6px 10px 2px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+
+  /* historique et réglages */
+  .page-list { display: flex; flex-direction: column; padding-bottom: 20px; }
+  .page-list > .card { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  .h-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .h-head h1 { margin: 0; }
+  .h-head p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .h-list { overflow: auto; padding: 4px 10px 12px; }
+  .h-group { color: var(--faint); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: 16px 10px 6px; }
+  .h-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto 30px; gap: 14px; align-items: center; padding: 10px; border-radius: 10px; cursor: pointer; }
+  .h-row:hover { background: var(--hover); }
+  .h-row .thumb { width: 36px; height: 36px; border-radius: 9px; }
+  .h-row .ti { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .h-row .meta { color: var(--muted); font-size: 12.5px; }
+  .h-row .meta em { color: var(--gold); font-style: normal; }
+  .h-row .date { color: var(--faint); font-size: 12.5px; white-space: nowrap; }
+  .h-row .del { width: 30px; height: 30px; border: 0; border-radius: 8px; background: none; color: var(--faint); cursor: pointer; opacity: 0; }
+  .h-row:hover .del { opacity: 1; }
+  .h-row .del:hover { background: var(--panel-2); color: var(--ko); }
+  .set { overflow: auto; padding: 8px 20px 20px; display: grid; gap: 4px; max-width: 760px; }
+  .set section { padding: 16px 0; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
+  .set section:last-child { border: 0; }
+  .set h2 { margin: 0; font-size: 15px; }
+  .set p { margin: 0; color: var(--muted); font-size: 13px; }
+  .seg-ctl { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); width: max-content; }
+  .seg-ctl button { border: 0; background: none; padding: 6px 14px; border-radius: 7px; cursor: pointer; color: var(--muted); }
+  .seg-ctl button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+
+  /* fenêtre « liens Spotify » */
+  .modal-bg { position: fixed; inset: 0; z-index: 40; background: rgba(15, 12, 30, .35); display: grid; place-items: center; padding: 16px; }
+  .modal { width: min(560px, 100%); max-height: 90vh; overflow: auto; padding: 20px; display: grid; gap: 12px; }
+  .modal h2 { margin: 0; font-size: 17px; }
+  .modal p { margin: 0; color: var(--muted); font-size: 13px; }
+  .modal textarea { width: 100%; height: 150px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); font: 12.5px/1.4 ui-monospace, Menlo, monospace; resize: vertical; }
+  .modal .row-btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .toast { position: fixed; left: 50%; bottom: 84px; transform: translate(-50%, 16px); opacity: 0; background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; font-weight: 600; font-size: 13px; transition: .25s; pointer-events: none; z-index: 50; max-width: 90vw; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (max-width: 860px) { .app { grid-template-columns: 1fr; } aside { display: none; } .page { padding: 14px 14px 0; } .dock { margin: 0 -14px; padding: 12px 14px; } .more { padding-left: 16px; } }
 </style>
 </head>
 <body>
-<main>
-  <div class="row" style="justify-content:space-between;margin:0">
-    <h1>🎧 Mix Scanner</h1>
-    <button id="quit" type="button" hidden title="Arrêter Mix Scanner">⏻ Quitter</button>
+<div class="app">
+  <aside>
+    <div class="brand">
+      <svg viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="10" fill="#7c4dff"/><circle cx="20" cy="18" r="11" fill="#15121f"/><circle cx="20" cy="18" r="8" fill="none" stroke="#3a3550" stroke-width=".8"/><circle cx="20" cy="18" r="4" fill="#fbbf24"/><circle cx="20" cy="18" r="1" fill="#15121f"/><g fill="#fff"><rect x="9" y="32" width="2" height="3" rx="1"/><rect x="13" y="30.5" width="2" height="4.5" rx="1"/><rect x="17" y="31.5" width="2" height="3.5" rx="1"/><rect x="21" y="30" width="2" height="5" rx="1"/><rect x="25" y="31" width="2" height="4" rx="1"/><rect x="29" y="32" width="2" height="3" rx="1"/></g></svg>
+      <div><b>Mix Scanner</b><span>la tracklist de vos mix</span></div>
+    </div>
+    <nav>
+      <button class="on" data-page="scan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>Analyse<span class="count" id="nav-count" hidden></span></button>
+      <button data-page="history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>Historique<span class="count" id="hist-count" hidden></span></button>
+      <button data-page="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Réglages</button>
+    </nav>
+    <div class="side-title">Analyses récentes</div>
+    <div class="recent" id="recent"></div>
+    <div class="side-foot">
+      <b><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Tout reste sur votre Mac</b>
+      Les mix et analyses ne sont envoyés nulle part, seule la reconnaissance passe par Shazam.
+      <div class="ver"><span id="version">Mix Scanner</span><i id="ver-state" hidden></i></div>
+      <button id="quit" type="button" hidden title="Arrêter Mix Scanner">⏻ Quitter</button>
+    </div>
+  </aside>
+
+  <main>
+    <div id="update" hidden>
+      <span id="update-text"></span>
+      <button class="btn sm primary" id="update-go" type="button">Mettre à jour</button>
+      <a class="btn sm" id="update-page" target="_blank" rel="noopener" hidden>Télécharger à la main</a>
+    </div>
+
+    <!-- ===== Analyse ===== -->
+    <section class="page page-scan" id="page-scan">
+      <header>
+        <div style="min-width:0">
+          <div class="eyebrow" id="eyebrow"></div>
+          <h1 id="mixtitle">Nouvelle analyse</h1>
+          <div class="sub" id="sub">Collez le lien d'un mix DJ ou choisissez un fichier audio : chaque morceau est identifié dans l'ordre.</div>
+        </div>
+        <div class="stats" id="stats" hidden>
+          <div class="stat"><b id="s-tracks">0</b><span>morceaux</span></div>
+          <div class="stat gold"><b id="s-review">0</b><span>à vérifier</span></div>
+          <div class="stat ok"><b id="s-stream">0</b><span id="s-stream-l">en streaming</span></div>
+          <div class="stat"><b id="s-cov">—</b><span id="s-cov-l">du mix reconnu</span></div>
+        </div>
+      </header>
+
+      <form class="card source" id="f" autocomplete="off">
+        <label class="field" title="Lien YouTube, SoundCloud… ou glissez un fichier audio ici">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.8 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+          <input type="text" id="url" placeholder="Collez un lien YouTube ou SoundCloud… ou déposez un fichier audio ici" spellcheck="false">
+        </label>
+        <label class="chip-sel" title="Fréquence d'analyse : plus précis = plus long">Précision
+          <select id="step"><option value="20">Haute</option><option value="30" selected>Normale</option><option value="45">Rapide</option></select>
+        </label>
+        <button class="chip-sel" type="button" id="opt-btn" title="Options : service de reconnaissance, cookies YouTube, plateformes">⚙︎</button>
+        <button class="btn" type="button" id="file" title="Analyser un mix enregistré sur ce Mac (MP3, M4A, WAV…)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Fichier</button>
+        <input type="file" id="file-input" accept="audio/*,video/mp4,video/webm,.mp3,.m4a,.aac,.wav,.aif,.aiff,.flac,.ogg,.opus" hidden>
+        <button class="btn primary" id="go" type="submit">Analyser</button>
+
+        <div class="pop" id="opts" hidden>
+          <label>Service de reconnaissance
+            <select id="rec"><option value="shazam">Shazam (gratuit)</option><option value="acrcloud">ACRCloud (clé requise)</option><option value="audd">AudD (clé requise)</option></select>
+          </label>
+          <label>Cookies YouTube
+            <select id="cookies"><option value="">Aucun</option><option value="chrome">Chrome</option><option value="safari">Safari</option><option value="firefox">Firefox</option><option value="edge">Edge</option><option value="brave">Brave</option></select>
+            <span class="hint">Si YouTube demande « confirmez que vous n'êtes pas un robot » : choisissez le navigateur où vous êtes connecté à YouTube.</span>
+          </label>
+          <label class="check"><input type="checkbox" id="plat" checked> Vérifier les plateformes (Spotify, Deezer…)</label>
+        </div>
+
+        <div class="progress" id="progress" hidden>
+          <div class="pg-top">
+            <div class="steps"><span class="step" id="st-dl">Téléchargement</span><span class="sep">›</span><span class="step" id="st-rec">Reconnaissance des morceaux</span><span class="sep">›</span><span class="step" id="st-plat">Vérification des plateformes</span></div>
+            <div class="pg-num"><b id="pg-pct">0 %</b><span id="pg-eta"></span></div>
+          </div>
+          <div class="pg-bar"><div id="pg-fill"></div></div>
+          <div class="pg-foot" id="pg-foot"></div>
+        </div>
+      </form>
+
+      <section class="card tracks">
+        <div class="tr-head">
+          <div class="tr-tabs">
+            <button type="button" class="on" data-f="all">Tous<span class="n" id="c-all"></span></button>
+            <button type="button" class="warn" data-f="review">À vérifier<span class="n" id="c-review"></span></button>
+          </div>
+          <span class="status" id="status"></span>
+          <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" placeholder="Rechercher"></label>
+        </div>
+        <div class="rows" id="rows"></div>
+      </section>
+
+      <div class="dock" id="dock" hidden>
+        <div class="sp-logo"><svg viewBox="0 0 24 24" fill="#000"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm4.6 14.4a.6.6 0 0 1-.9.2c-2.4-1.5-5.4-1.8-9-1a.6.6 0 1 1-.3-1.2c3.9-.9 7.2-.5 9.9 1.1.3.2.4.6.3.9zm1.2-2.7a.8.8 0 0 1-1 .3c-2.7-1.7-6.9-2.2-10.2-1.2a.8.8 0 1 1-.4-1.5c3.7-1.1 8.4-.6 11.4 1.3.3.2.4.7.2 1.1zm.1-2.8C14.7 9 9.4 8.8 6.3 9.7a.9.9 0 1 1-.5-1.8c3.5-1.1 9.4-.9 13.1 1.3a.9.9 0 0 1-1 1.6z"/></svg></div>
+        <div class="txt"><b id="dock-title"></b><span id="dock-sub"></span></div>
+        <div class="acts">
+          <button class="btn sm primary" type="button" id="copy">📋 Copier la liste</button>
+          <a class="btn sm" href="https://www.tunemymusic.com/fr/transfer" target="_blank" rel="noopener">TuneMyMusic ↗</a>
+          <a class="btn sm" href="https://www.spotlistr.com/search/textbox" target="_blank" rel="noopener">Spotlistr ↗</a>
+          <button class="btn sm" type="button" id="exp-btn">Exporter ▾</button>
+          <div class="menu" id="exp-menu">
+            <div class="h">Fichiers</div>
+            <button type="button" data-exp="txt">Tracklist (texte)</button>
+            <button type="button" data-exp="csv">Tableau (CSV / Excel)</button>
+            <button type="button" data-exp="md">Markdown</button>
+            <button type="button" data-exp="json">JSON</button>
+            <button type="button" data-exp="playlist">Liste « Artiste - Titre » (.txt)</button>
+            <hr>
+            <div class="h">Spotify</div>
+            <button type="button" id="sl-open">Liens Spotify à coller dans l'app…</button>
+            <button type="button" id="oauth" hidden>Créer la playlist sur mon compte Spotify ↗</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Historique ===== -->
+    <section class="page page-list" id="page-history" hidden>
+      <div class="card">
+        <div class="h-head">
+          <div><h1>Historique</h1><p>Vos analyses restent sur ce Mac : rouvrez-en une sans refaire le scan.</p></div>
+          <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="hq" placeholder="Mix…"></label>
+        </div>
+        <div class="h-list" id="hlist"></div>
+      </div>
+    </section>
+
+    <!-- ===== Réglages ===== -->
+    <section class="page page-list" id="page-settings" hidden>
+      <div class="card">
+        <div class="h-head"><div><h1>Réglages</h1><p>Enregistrés sur ce Mac.</p></div></div>
+        <div class="set">
+          <section>
+            <h2>Apparence</h2>
+            <div class="seg-ctl" id="theme-ctl"><button type="button" data-theme="light">Clair</button><button type="button" data-theme="dark">Sombre</button><button type="button" data-theme="auto">Comme le Mac</button></div>
+          </section>
+          <section>
+            <h2>Analyse par défaut</h2>
+            <div class="grid2">
+              <label>Précision<select id="d-step"><option value="20">Haute (toutes les 20 s)</option><option value="30">Normale (toutes les 30 s)</option><option value="45">Rapide (toutes les 45 s)</option></select></label>
+              <label>Service de reconnaissance<select id="d-rec"><option value="shazam">Shazam (gratuit)</option><option value="acrcloud">ACRCloud (clé requise)</option><option value="audd">AudD (clé requise)</option></select></label>
+              <label>Cookies YouTube<select id="d-cookies"><option value="">Aucun</option><option value="chrome">Chrome</option><option value="safari">Safari</option><option value="firefox">Firefox</option><option value="edge">Edge</option><option value="brave">Brave</option></select></label>
+            </div>
+            <label class="check"><input type="checkbox" id="d-plat"> Vérifier la disponibilité sur les plateformes (Spotify, Deezer, Apple Music, YouTube)</label>
+          </section>
+          <section>
+            <h2>Historique</h2>
+            <p id="hist-info">Aucune analyse enregistrée.</p>
+            <div><button class="btn sm" type="button" id="hist-clear">Supprimer tout l'historique</button></div>
+          </section>
+          <section>
+            <h2>À propos</h2>
+            <p id="about">Mix Scanner</p>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal-bg" id="sl-modal" hidden>
+  <div class="card modal">
+    <h2>Liens Spotify à coller dans l'app</h2>
+    <p>L'outil cherche le lien Spotify de chaque morceau (1 à 3 s par morceau). Dans l'app Spotify : <em>+ Créer → Playlist</em>, cliquez dans la playlist vide puis <b>Cmd + V</b>. Les remix et edits de DJ sont souvent introuvables : pour eux, préférez « Copier la liste » + TuneMyMusic.</p>
+    <p id="sl-status"></p>
+    <textarea id="sl-text" readonly hidden></textarea>
+    <p id="sl-missing"></p>
+    <div class="row-btns">
+      <button class="btn sm" type="button" id="sl-close">Fermer</button>
+      <button class="btn sm" type="button" id="sl-go">🔗 Préparer les liens</button>
+      <button class="btn sm primary" type="button" id="sl-copy" hidden>📋 Copier les liens</button>
+    </div>
   </div>
-  <div id="update" hidden>
-    <span id="update-text"></span>
-    <button class="primary" id="update-go" type="button">Mettre à jour</button>
-    <a class="btn" id="update-page" target="_blank" rel="noopener" hidden>Télécharger à la main</a>
-  </div>
-  <p class="sub">Collez le lien d'un mix DJ (YouTube, SoundCloud…) ou choisissez un fichier audio : chaque morceau est identifié dans l'ordre, avec sa version et sa disponibilité sur les plateformes.</p>
-
-  <form id="f">
-    <input type="text" id="url" placeholder="Lien YouTube / SoundCloud… ou glissez un fichier audio ici" required
-      autocomplete="off" spellcheck="false">
-    <button type="button" id="file" title="Analyser un mix enregistré sur ce Mac (MP3, M4A, WAV…)">📂 Fichier audio</button>
-    <input type="file" id="file-input" accept="audio/*,video/mp4,video/webm,.mp3,.m4a,.aac,.wav,.aif,.aiff,.flac,.ogg,.opus" hidden>
-    <select id="step" title="Fréquence d'analyse">
-      <option value="20">Précis (toutes les 20 s)</option>
-      <option value="30" selected>Normal (toutes les 30 s)</option>
-      <option value="45">Rapide (toutes les 45 s)</option>
-    </select>
-    <select id="rec" title="Service de reconnaissance">
-      <option value="shazam">Shazam</option>
-      <option value="acrcloud">ACRCloud</option>
-      <option value="audd">AudD</option>
-    </select>
-    <select id="cookies" title="Si YouTube demande de confirmer que vous n'êtes pas un robot : utiliser la session YouTube de ce navigateur">
-      <option value="">Cookies YouTube : aucun</option>
-      <option value="chrome">Cookies : Chrome</option>
-      <option value="safari">Cookies : Safari</option>
-      <option value="firefox">Cookies : Firefox</option>
-      <option value="edge">Cookies : Edge</option>
-      <option value="brave">Cookies : Brave</option>
-    </select>
-    <label class="opt"><input type="checkbox" id="plat" checked> Vérifier les plateformes</label>
-    <button class="primary" id="go">Analyser</button>
-  </form>
-
-  <div id="status"></div>
-  <div id="warn" class="legend"></div>
-  <div class="bar"><div id="prog"></div></div>
-
-  <div class="head" id="head" hidden>
-    <h2 id="mixtitle"></h2>
-    <div class="exports" id="exports" hidden>
-      Exporter :
-      <a id="x-txt">Texte</a><a id="x-csv">CSV</a><a id="x-md">Markdown</a><a id="x-json">JSON</a>
-      <a id="x-playlist" href="#playlist" hidden>🎵 Playlist Spotify ↓</a>
-    </div>
-  </div>
-  <ol id="list"></ol>
-  <p class="legend" id="legend" hidden>Vert : disponible (même version) · Orange : trouvé mais autre version · Rouge : introuvable · Gris : lien de recherche non vérifié · ⚠️ à vérifier : Shazam a hésité entre plusieurs versions, ou le morceau n'existe ni sur Deezer ni sur Apple Music (reprise, inédit ou erreur de reconnaissance)</p>
-
-  <section id="playlist" hidden>
-    <h2>🎵 Créer une playlist Spotify</h2>
-    <p><strong>Méthode recommandée — gratuite, sans Premium :</strong></p>
-    <ol class="steps">
-      <li>Cliquez sur « Copier la liste » (une ligne « Artiste - Titre » par morceau).</li>
-      <li>Ouvrez TuneMyMusic (ou Spotlistr), collez la liste, connectez votre compte Spotify : la playlist est créée.</li>
-    </ol>
-    <textarea id="pl-text" readonly></textarea>
-    <div id="review" hidden>
-      <strong>⚠️ <span id="review-count"></span> à vérifier</strong> — Shazam a peut-être reconnu une reprise
-      ou un remake au lieu du morceau joué. Écoutez ces passages et corrigez la liste si besoin avant de la coller :
-      <ul id="review-list"></ul>
-    </div>
-    <div class="row">
-      <button class="primary" id="pl-copy" type="button">📋 Copier la liste</button>
-      <a class="btn" href="https://www.tunemymusic.com/fr/transfer" target="_blank" rel="noopener">TuneMyMusic</a>
-      <a class="btn" href="https://www.spotlistr.com/search/textbox" target="_blank" rel="noopener">Spotlistr</a>
-      <a class="btn" id="pl-dl">Télécharger (.txt)</a>
-    </div>
-
-    <p style="margin-top:20px"><strong>Autre méthode — liens Spotify à coller dans l'app :</strong>
-      l'outil cherche le lien Spotify de chaque morceau (base MusicBrainz, ou API Spotify si vos clés sont configurées).
-      Sans clé Spotify, les morceaux peu connus (remix, edits de DJ) sont souvent introuvables.</p>
-    <ol class="steps">
-      <li>Cliquez sur « Préparer les liens Spotify » (1 à 3 s par morceau, laissez la page ouverte).</li>
-      <li>Cliquez sur « Copier les liens Spotify ».</li>
-      <li>Dans l'app Spotify : <em>+ Créer → Playlist</em>, cliquez dans la playlist vide puis faites <strong>Cmd + V</strong>.</li>
-    </ol>
-    <div class="row">
-      <button id="sl-go" type="button">🔗 Préparer les liens Spotify</button>
-      <span id="sl-status" class="muted"></span>
-    </div>
-    <div id="sl-result" hidden>
-      <textarea id="sl-text" readonly></textarea>
-      <div class="row"><button id="sl-copy" type="button">📋 Copier les liens Spotify</button></div>
-      <p id="sl-missing"></p>
-    </div>
-    <div id="pl-direct" hidden>
-      <p><strong>Connexion directe :</strong> l'outil crée la playlist lui-même sur votre compte (app Spotify avec Web API requise).</p>
-      <div class="row"><a class="btn spotify" id="pl-oauth" target="_blank" rel="noopener">Créer la playlist sur mon compte Spotify</a></div>
-    </div>
-  </section>
-  <p class="legend" id="version"></p>
-</main>
+</div>
+<div class="toast" id="toast"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const KINDS = { original: "Original", remix: "Remix", mashup: "Mashup", edit: "Edit", bootleg: "Bootleg",
-  vip: "VIP", extended: "Version longue", dub: "Dub", acapella: "A cappella", instrumental: "Instrumental",
-  live: "Live", cover: "Reprise" };
-const PLATS = { spotify: "Spotify", soundcloud: "SoundCloud", deezer: "Deezer", apple_music: "Apple Music",
-  youtube: "YouTube", beatport: "Beatport", google: "Google" };
-const STAGES = { queued: "En attente…", download: "Téléchargement de l'audio", source: "Préparation",
-  recognize: "Reconnaissance des morceaux", tracklist: "Construction de la tracklist",
-  platforms: "Vérification des plateformes", retry: "Nouvel essai sur les extraits en échec" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-let timer = null;
-const plural = (n, word, many = word + "s") => `${n} ${n > 1 ? many : word}`;
+const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : String(m).padStart(2, "0")) + ":" + String(x).padStart(2, "0"); };
+const KINDS = { original: "Original", remix: "Remix", mashup: "Mashup", edit: "Edit", bootleg: "Bootleg", vip: "VIP",
+  extended: "Version longue", dub: "Dub", acapella: "A cappella", instrumental: "Instrumental", live: "Live", cover: "Reprise" };
+const PLATS = [["spotify", "Spotify"], ["deezer", "Deezer"], ["apple_music", "Apple Music"], ["youtube", "YouTube"], ["soundcloud", "SoundCloud"]];
+const STREAMING = ["spotify", "deezer", "apple_music"];
+const GRADS = [["#f97316", "#db2777"], ["#06b6d4", "#6366f1"], ["#84cc16", "#0d9488"], ["#a855f7", "#ec4899"], ["#eab308", "#ef4444"], ["#14b8a6", "#3b82f6"], ["#f43f5e", "#8b5cf6"], ["#22c55e", "#06b6d4"]];
+const grad = (key) => { let h = 0; for (const c of String(key)) h = (h * 31 + c.charCodeAt(0)) >>> 0; const g = GRADS[h % GRADS.length]; return `background:linear-gradient(135deg,${g[0]},${g[1]})`; };
+const desktop = () => (window.pywebview && window.pywebview.api) || null;  // fenêtre de l'app Mac
 
-// --- Fichier audio : sélecteur de macOS (app), sinon envoi du fichier à l'outil -------------
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2600); }
+
+// --- Réglages (enregistrés dans ce navigateur / cette app) -------------------------------
+const DEFAULTS = { theme: "light", step: "30", rec: "shazam", cookies: "", plat: true };
+let settings = { ...DEFAULTS };
+try { settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem("mixscanner-settings") || "{}") }; } catch (e) {}
+const saveSettings = () => { try { localStorage.setItem("mixscanner-settings", JSON.stringify(settings)); } catch (e) {} };
+function applySettings() {
+  document.documentElement.dataset.theme = settings.theme;
+  document.querySelectorAll("#theme-ctl button").forEach((b) => b.classList.toggle("on", b.dataset.theme === settings.theme));
+  $("step").value = $("d-step").value = settings.step;
+  $("rec").value = $("d-rec").value = settings.rec;
+  $("cookies").value = $("d-cookies").value = settings.cookies;
+  $("plat").checked = $("d-plat").checked = settings.plat;
+}
+applySettings();
+$("theme-ctl").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { settings.theme = b.dataset.theme; saveSettings(); applySettings(); } });
+[["d-step", "step"], ["d-rec", "rec"], ["d-cookies", "cookies"]].forEach(([id, k]) => $(id).addEventListener("change", (e) => { settings[k] = e.target.value; saveSettings(); applySettings(); }));
+$("d-plat").addEventListener("change", (e) => { settings.plat = e.target.checked; saveSettings(); applySettings(); });
+
+// --- Navigation --------------------------------------------------------------------------
+let page = "scan";
+function showPage(p) {
+  page = p;
+  for (const name of ["scan", "history", "settings"]) $(`page-${name}`).hidden = name !== p;
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.page === p));
+  if (p === "history" || p === "settings") loadHistory();
+}
+document.querySelector("nav").addEventListener("click", (e) => { const b = e.target.closest("button[data-page]"); if (b) showPage(b.dataset.page); });
+
+// --- Analyse en cours / affichée ---------------------------------------------------------
+let job = null, jobId = null, timer = null, filter = "all", query = "", openIdx = null;
+
+function sourceBadge(j) {
+  const k = j.kind || "Lien";
+  return `<span class="src-badge ${k.toLowerCase()}">${k === "YouTube" ? "▶ " : k === "Fichier" ? "♪ " : ""}${esc(k)}</span>`;
+}
+const when = (ts) => {
+  const d = new Date(ts * 1000), now = new Date(), day = 864e5;
+  const d0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()), n0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((n0 - d0) / day), hm = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return diff === 0 ? `aujourd'hui à ${hm}` : diff === 1 ? `hier à ${hm}` : `le ${d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} à ${hm}`;
+};
+
+function renderHeader() {
+  const j = job, running = j && ["queued", "running"].includes(j.status);
+  $("stats").hidden = !j || !j.tracks.length && running;
+  if (!j) {
+    $("eyebrow").innerHTML = ""; $("mixtitle").textContent = "Nouvelle analyse";
+    $("sub").className = "sub"; $("sub").textContent = "Collez le lien d'un mix DJ ou choisissez un fichier audio : chaque morceau est identifié dans l'ordre.";
+    return;
+  }
+  const src = j.source || {}, st = j.stats || {};
+  const step = (j.options || {}).step || 30, rec = { shazam: "Shazam", acrcloud: "ACRCloud", audd: "AudD" }[(j.options || {}).recognizer] || "Shazam";
+  $("eyebrow").innerHTML = `${sourceBadge(j)}${src.duration ? `<span>${fmt(src.duration)}</span>` : ""}<span>· analysé toutes les ${step} s · ${rec}</span>`;
+  $("mixtitle").textContent = src.title || (j.status === "error" ? "Analyse impossible" : "Préparation de l'analyse…");
+  const sub = $("sub"); sub.className = "sub";
+  if (j.status === "error") { sub.className = "sub err"; sub.textContent = j.error; }
+  else if (j.status === "cancelled") sub.textContent = "Analyse arrêtée. Relancez-la : elle reprendra là où elle s'était arrêtée.";
+  else if (running) sub.textContent = j.tracks.length ? "Les morceaux apparaissent au fur et à mesure — vous pouvez déjà les parcourir" : "L'analyse démarre…";
+  else {
+    const silent = st.windows ? st.windows - (st.recognized_windows || 0) : 0;
+    const date = when(j.created);
+    sub.textContent = (j.reopened ? (date.startsWith("le ") ? "Analyse du " + date.slice(3) : "Analyse faite " + date) : "Analyse terminée")
+      + (st.windows ? ` · ${st.windows} extraits${silent ? `, dont ${silent} sans musique reconnue` : ""}` : "");
+  }
+  $("s-tracks").textContent = st.tracks ?? j.tracks.length;
+  $("s-review").textContent = st.review ?? 0;
+  if (st.checked) { $("s-stream").textContent = st.streaming; $("s-stream-l").textContent = "en streaming"; }
+  else { $("s-stream").textContent = "—"; $("s-stream-l").textContent = running ? "vérifié à la fin" : "plateformes non vérifiées"; }
+  if (running) { $("s-cov").textContent = Math.round(overall(j) * 100) + " %"; $("s-cov-l").textContent = "analysé"; }
+  else { $("s-cov").textContent = st.coverage != null ? st.coverage + " %" : "—"; $("s-cov-l").textContent = "du mix reconnu"; }
+  $("nav-count").hidden = !j.tracks.length; $("nav-count").textContent = j.tracks.length;
+}
+
+// Avancement global : téléchargement 0-10 %, reconnaissance 10-90 %, plateformes 90-100 %.
+function overall(j) {
+  const p = j.progress || 0;
+  if (["queued", "download", "source"].includes(j.stage)) return 0.1 * p;
+  if (["recognize", "retry"].includes(j.stage)) return 0.1 + 0.8 * (j.windows_total ? j.windows_done / j.windows_total : p);
+  if (j.stage === "tracklist") return 0.9;
+  if (j.stage === "platforms") return 0.9 + 0.1 * p;
+  return 1;
+}
+
+function renderProgress() {
+  const j = job, running = j && ["queued", "running"].includes(j.status);
+  $("progress").hidden = !running;
+  $("go").textContent = running ? "Arrêter" : "Analyser";
+  $("go").classList.toggle("primary", !running);
+  if (!running) return;
+  const order = ["dl", "rec", "plat"];
+  const cur = ["recognize", "retry"].includes(j.stage) ? "rec" : ["tracklist", "platforms"].includes(j.stage) ? "plat" : "dl";
+  order.forEach((s, i) => { const el = $("st-" + s); el.className = "step" + (i < order.indexOf(cur) ? " done" : s === cur ? " on" : ""); });
+  $("st-dl").textContent = (order.indexOf(cur) > 0 ? "✓ " : "") + "Téléchargement";
+  $("st-rec").textContent = (order.indexOf(cur) > 1 ? "✓ " : "") + "Reconnaissance des morceaux";
+  const pct = Math.round(overall(j) * 100);
+  $("pg-pct").textContent = pct + " %"; $("pg-fill").style.width = pct + "%";
+  $("pg-eta").textContent = j.eta ? ` · environ ${j.eta < 90 ? "1 min" : Math.round(j.eta / 60) + " min"} restante${j.eta < 90 ? "" : "s"}` : cur === "plat" ? " · presque fini" : "";
+  let foot = cur === "dl" ? (j.stage === "download" && j.progress ? `Téléchargement de l'audio… ${Math.round(j.progress * 100)} %` : "Préparation du mix…")
+    : cur === "rec" ? `${j.windows_done} extraits analysés sur ${j.windows_total || "…"} · les morceaux s'affichent au fur et à mesure`
+    : `Vérification de ${plural(j.tracks.length, "morceau", "morceaux")} sur Spotify, Deezer, Apple Music…`;
+  if (j.stage === "retry") foot = "Nouvel essai sur les extraits en échec…";
+  if (j.warning_count) foot += ` · <span class="warn">${plural(j.warning_count, "extrait sera retenté", "extraits seront retentés")} à la fin</span>`;
+  $("pg-foot").innerHTML = foot;
+}
+
+function isStreaming(t) { return t.availability.some((p) => STREAMING.includes(p.platform) && p.status === "available"); }
+function matches(t) {
+  if (query && !(t.title + " " + t.artist).toLowerCase().includes(query)) return false;
+  return filter !== "review" || t.needs_review;
+}
+function listenUrl(t) {
+  const u = (job && (job.source || {}).url) || "";
+  const s = Math.max(0, Math.floor(t.start));
+  if (job && job.kind === "YouTube" && job.source && job.source.video_id) return `https://www.youtube.com/watch?v=${encodeURIComponent(job.source.video_id)}&t=${s}s`;
+  if (job && job.kind === "SoundCloud" && /^https?:/.test(u)) return `${u.split("#")[0]}#t=${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  return null;
+}
+
+function renderRows() {
+  const j = job, rows = $("rows");
+  const running = j && ["queued", "running"].includes(j.status);
+  if (!j) {
+    rows.innerHTML = `<div class="empty"><b>Collez le lien d'un mix pour commencer</b>YouTube, SoundCloud, ou un fichier audio de ce Mac (bouton Fichier ou glisser-déposer).<br>Vos analyses précédentes sont dans l'Historique.</div>`;
+    $("c-all").textContent = $("c-review").textContent = ""; $("status").innerHTML = ""; return;
+  }
+  const tracks = j.tracks;
+  $("c-all").textContent = tracks.length; $("c-review").textContent = tracks.filter((t) => t.needs_review).length;
+  $("status").innerHTML = running ? `<span class="dot-live"></span>En cours…` : j.status === "done" ? `<span class="dot-done"></span>Terminé`
+    : j.status === "cancelled" ? `<span class="dot-off"></span>Arrêtée` : j.status === "error" ? `<span class="dot-off"></span>Échec` : "";
+  const checked = tracks.some((t) => t.availability.length);
+  let html = tracks.filter(matches).map((t) => {
+    const k = t.version.kind, open = openIdx === t.index;
+    const right = (t.needs_review ? '<span class="rv-pill">à vérifier</span>' : k !== "original" ? `<span class="kind">${esc(KINDS[k] || k)}</span>` : "")
+      + (t.source === "description" ? '<span class="kind">d\'après la description</span>' : "")
+      + (checked && t.availability.length ? `<span class="stdot${isStreaming(t) ? "" : " no"}" title="${isStreaming(t) ? "Disponible en streaming (Spotify, Deezer ou Apple Music)" : "Introuvable en streaming"}"></span>` : "");
+    const plats = PLATS.map(([key, name]) => {
+      const p = t.availability.find((x) => x.platform === key);
+      if (!p) return "";
+      if (p.status === "available") return `<a href="${esc(p.url || p.search_url)}" target="_blank" rel="noopener" class="${p.same_version === false ? "other" : ""}" title="${esc(p.matched_title || "")}">${name}${p.same_version === false ? " (autre version)" : ""}</a>`;
+      if (p.status === "not_found") return `<span class="no">${name}</span>`;
+      return p.search_url ? `<a href="${esc(p.search_url)}" target="_blank" rel="noopener" class="srch" title="${esc(p.note || "Non vérifié : lien de recherche")}">🔎 ${name}</a>` : "";
+    }).join("");
+    const alts = (t.alternatives || []).map((a, i) => `<div class="alt"><div>Shazam a hésité avec <span>${esc(a.artist)} – ${esc(a.title)}</span></div>${j.status === "done" ? `<button class="link-btn" type="button" data-alt="${t.index}:${i}">Garder plutôt celui-ci</button>` : ""}</div>`).join("");
+    const lone = t.needs_review && !(t.alternatives || []).length ? `<div class="alt"><div><span>Introuvable sur Deezer et Apple Music</span> : souvent un remix de DJ, un inédit ou une erreur de reconnaissance.</div></div>` : "";
+    const listen = listenUrl(t);
+    const info = [`Joué de ${t.start_str} à ${t.end_str}`, t.source === "description" ? "d'après la description du mix" : `reconnu ${plural(t.hits, "fois", "fois")}`,
+      t.version.label && k !== "original" ? esc(t.version.label) : "", t.label ? esc(t.label) : "", t.year ? esc(t.year) : ""].filter(Boolean).join(" · ");
+    return `<div class="row${open ? " open" : ""}" data-i="${t.index}">
+        <span class="t">${t.start_str}</span>
+        <div style="min-width:0"><div class="ti">${esc(t.title)}</div><div class="ar">${esc(t.artist)}</div></div>
+        <div class="right">${right}</div><span class="chev">›</span>
+      </div>
+      <div class="more">
+        <div>${info}</div>
+        ${plats ? `<div class="links">${plats}</div>` : ""}
+        ${alts}${lone}
+        <div class="acts">${listen ? `<a class="link-btn" href="${esc(listen)}" target="_blank" rel="noopener">▶ Écouter ce passage</a>` : ""}<button class="link-btn" type="button" data-copy="${esc(t.artist ? t.artist + " - " + t.title : t.title)}">Copier le titre</button></div>
+      </div>`;
+  }).join("");
+  if (running) html += [1, 2].map(() => `<div class="row pending"><span class="t">··</span><div><div class="skel" style="width:45%"></div><div class="skel" style="width:28%;margin-top:7px"></div></div><div></div><span></span></div>`).join("");
+  if (!html) html = j.status === "error" ? `<div class="empty"><b>L'analyse n'a pas pu se faire</b>${esc(j.error || "")}</div>`
+    : `<div class="empty">${filter === "review" ? "Aucun morceau à vérifier. 👍" : query ? "Aucun morceau ne correspond." : "Aucun morceau reconnu."}</div>`;
+  rows.innerHTML = html;
+}
+
+function renderDock() {
+  const j = job, running = j && ["queued", "running"].includes(j.status);
+  $("dock").hidden = !j || (!j.tracks.length && !running);
+  if ($("dock").hidden) return;
+  const st = j.stats || {}, review = j.tracks.filter((t) => t.needs_review).length;
+  $("copy").disabled = running || !j.tracks.length; $("exp-btn").disabled = running;
+  if (running) {
+    $("dock-title").textContent = "La playlist sera prête à la fin de l'analyse";
+    $("dock-sub").textContent = `${plural(j.tracks.length, "morceau trouvé", "morceaux trouvés")} pour l'instant`;
+  } else {
+    $("dock-title").textContent = `Playlist prête : ${plural(st.playlist ?? j.tracks.length, "morceau", "morceaux")}`;
+    $("dock-sub").innerHTML = `Doublons et « ID » retirés${review ? ` · <em>${review} à vérifier</em> avant de copier` : ""}`;
+  }
+}
+
+let shownUrlFor = null;
+function render() {
+  if (job && shownUrlFor !== job.id) { shownUrlFor = job.id; if (job.url && job.url !== "x") $("url").value = job.url; }
+  renderHeader(); renderProgress(); renderRows(); renderDock(); renderRecent(); }
+
+async function poll() {
+  clearTimeout(timer);
+  if (!jobId) return;
+  try {
+    const r = await fetch(`/api/jobs/${jobId}`);
+    if (r.status === 404) { job = null; jobId = null; render(); return; }
+    job = await r.json();
+  } catch (e) { timer = setTimeout(poll, 2000); return; }
+  render();
+  if (["queued", "running"].includes(job.status)) timer = setTimeout(poll, 1200);
+  else if (job.status === "done") loadHistory();
+}
+
+function openJob(id) { jobId = id; job = null; openIdx = null; filter = "all"; query = ""; $("q").value = "";
+  document.querySelectorAll(".tr-tabs button").forEach((b) => b.classList.toggle("on", b.dataset.f === "all")); showPage("scan"); poll(); }
+
+// --- Lancer / arrêter -----------------------------------------------------------------------
+async function startScan(url) {
+  url = (url ?? $("url").value).trim();
+  if (!url) { $("url").focus(); return; }
+  $("url").value = url;
+  const body = { url, step: +$("step").value, recognizer: $("rec").value, check_platforms: $("plat").checked, cookies_from_browser: $("cookies").value };
+  try {
+    const r = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join(" ; ") : data.detail || r.statusText);
+    openJob(data.id);
+  } catch (err) { toast("Impossible de lancer l'analyse : " + err.message); }
+}
+$("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (job && ["queued", "running"].includes(job.status)) {
+    $("go").disabled = true;
+    await fetch(`/api/jobs/${jobId}/cancel`, { method: "POST" }).catch(() => {});
+    $("go").disabled = false; poll(); return;
+  }
+  startScan();
+});
+$("step").addEventListener("change", (e) => { settings.step = e.target.value; saveSettings(); applySettings(); });
+$("rec").addEventListener("change", (e) => { settings.rec = e.target.value; saveSettings(); applySettings(); });
+$("cookies").addEventListener("change", (e) => { settings.cookies = e.target.value; saveSettings(); applySettings(); });
+$("plat").addEventListener("change", (e) => { settings.plat = e.target.checked; saveSettings(); applySettings(); });
+$("opt-btn").addEventListener("click", () => { $("opts").hidden = !$("opts").hidden; });
+
+// --- Fichier audio : sélecteur de macOS (app), sinon envoi du fichier à l'outil ----------
 function sendFile(file) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/upload?name=${encodeURIComponent(file.name)}`);
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
-    xhr.upload.onprogress = (ev) => {
-      if (ev.lengthComputable) {
-        const pct = Math.round(ev.loaded / ev.total * 100);
-        $("status").textContent = `Chargement de « ${file.name} »… ${pct} %`;
-        $("prog").style.width = pct + "%";
-      }
-    };
-    xhr.onload = () => {
-      let body = {};
-      try { body = JSON.parse(xhr.responseText); } catch (e) {}
-      xhr.status === 200 ? resolve(body.path) : reject(new Error(body.detail || xhr.statusText));
-    };
+    xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) toast(`Chargement de « ${file.name} »… ${Math.round(ev.loaded / ev.total * 100)} %`); };
+    xhr.onload = () => { let b = {}; try { b = JSON.parse(xhr.responseText); } catch (e) {}
+      xhr.status === 200 ? resolve(b.path) : reject(new Error(b.detail || xhr.statusText)); };
     xhr.onerror = () => reject(new Error("envoi interrompu"));
     xhr.send(file);
   });
 }
 async function analyseFile(file) {
-  try {
-    $("go").disabled = true;
-    $("url").value = await sendFile(file);
-    $("go").disabled = false;
-    $("f").requestSubmit();
-  } catch (err) { fail("fichier non chargé : " + err.message); }
+  try { const path = await sendFile(file); startScan(path); }
+  catch (err) { toast("Fichier non chargé : " + err.message); }
 }
 $("file").addEventListener("click", async () => {
-  if (desktop()) {
-    const path = await desktop().choose_audio_file();
-    if (path) { $("url").value = path; $("f").requestSubmit(); }
-  } else {
-    $("file-input").click();
-  }
+  if (desktop()) { const path = await desktop().choose_audio_file(); if (path) startScan(path); }
+  else $("file-input").click();
 });
 $("file-input").addEventListener("change", (e) => { if (e.target.files[0]) analyseFile(e.target.files[0]); e.target.value = ""; });
-// Glisser-déposer un fichier audio n'importe où dans la fenêtre
 ["dragenter", "dragover"].forEach((t) => document.addEventListener(t, (e) => {
   if ([...(e.dataTransfer?.types || [])].includes("Files")) { e.preventDefault(); $("f").classList.add("drop"); }
 }));
@@ -241,63 +683,39 @@ document.addEventListener("drop", (e) => {
   const file = e.dataTransfer?.files?.[0];
   if (!file) return;
   e.preventDefault();
-  if ($("go").disabled) return;  // une analyse est déjà en cours
+  if (job && ["queued", "running"].includes(job.status)) { toast("Une analyse est déjà en cours."); return; }
   analyseFile(file);
 });
 
-$("f").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  clearTimeout(timer);
-  $("list").innerHTML = ""; $("head").hidden = true; $("playlist").hidden = true; $("sl-result").hidden = true;
-  $("sl-status").textContent = ""; clearTimeout(slTimer); $("x-playlist").hidden = true; $("review").hidden = true; $("exports").hidden = true; $("legend").hidden = true;
-  $("sl-go").disabled = false; $("sl-copy").textContent = "📋 Copier les liens Spotify"; $("prog").style.width = "0";
-  $("go").disabled = true;
-  $("warn").textContent = "";
-  $("status").textContent = "Démarrage…";
-  try {
-    const r = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: $("url").value.trim(), step: +$("step").value, recognizer: $("rec").value,
-        check_platforms: $("plat").checked, cookies_from_browser: $("cookies").value }) });
-    if (!r.ok) {
-      const detail = (await r.json().catch(() => ({}))).detail;
-      throw new Error(Array.isArray(detail) ? detail.map((d) => d.msg).join(" ; ") : detail || r.statusText);
-    }
-    poll((await r.json()).id);
-  } catch (err) { fail(err.message); }
+// --- Liste : onglets, recherche, déplier, autre détection, copier ------------------------
+document.querySelector(".tr-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  filter = b.dataset.f; document.querySelectorAll(".tr-tabs button").forEach((x) => x.classList.toggle("on", x === b)); renderRows();
+});
+$("q").addEventListener("input", (e) => { query = e.target.value.toLowerCase(); renderRows(); });
+$("rows").addEventListener("click", async (e) => {
+  const copyBtn = e.target.closest("[data-copy]");
+  if (copyBtn) { await copyText(copyBtn.dataset.copy); toast("Titre copié"); return; }
+  const altBtn = e.target.closest("[data-alt]");
+  if (altBtn) {
+    const [idx, k] = altBtn.dataset.alt.split(":"); altBtn.disabled = true; altBtn.textContent = "Mise à jour…";
+    const r = await fetch(`/api/jobs/${jobId}/tracks/${idx}/alternative/${k}`, { method: "POST" });
+    if (!r.ok) toast("Impossible de changer de version"); else toast("Version mise à jour");
+    poll(); return;
+  }
+  if (e.target.closest(".more")) return;
+  const row = e.target.closest(".row[data-i]"); if (!row) return;
+  const i = +row.dataset.i; openIdx = openIdx === i ? null : i; renderRows();
 });
 
-let slTimer = null;
-async function pollSpotifyLinks(id) {
-  let job;
-  try { job = await (await fetch(`/api/jobs/${id}`)).json(); }
-  catch (e) { slTimer = setTimeout(() => pollSpotifyLinks(id), 3000); return; }
-  const st = job.spotify_links || {};
-  if (st.status === "running") {
-    $("sl-status").textContent = st.total ? `Recherche… ${st.done}/${st.total} morceaux` : "Recherche…";
-    slTimer = setTimeout(() => pollSpotifyLinks(id), 2000);
-    return;
-  }
-  $("sl-go").disabled = false;
-  if (st.status === "error") { $("sl-status").textContent = "Erreur : " + st.error; return; }
-  if (st.status !== "done") return;
-  $("sl-status").textContent = `${st.links.length ? "✅" : "⚠️"} ${plural(st.links.length, "lien Spotify trouvé", "liens Spotify trouvés")}`;
-  $("sl-text").value = st.links.join("\n");
-  render(job);  // affiche les nouveaux badges Spotify
-  const d = st.diag || {};
-  const why = [];
-  const by = Object.entries(d.found_by || {}).map(([k, v]) => `${v} ${k}`);
-  if (by.length) $("sl-status").textContent += ` (${by.join(", ")})`;
-  if (d.errors) why.push(`${d.errors} erreur(s) : ${d.first_error}`);
-  $("sl-missing").textContent = st.missing.length
-    ? `Sans lien Spotify (${st.missing.length}${why.length ? " — " + why.join(", ") : ""}) : ${st.missing.join(" · ")}. `
-      + `Ajoutez-les à la main avec la recherche Spotify, ou utilisez « Copier la liste » + TuneMyMusic ci-dessus.` : "";
-  $("sl-result").hidden = false;
+async function copyText(text) {
+  if (desktop()) { try { if (await desktop().copy(text)) return true; } catch (e) {} }
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+  const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select();
+  const ok = document.execCommand("copy"); ta.remove(); return ok;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-let lastJob = null;
-
-// Liste « Artiste - Titre » construite à partir des morceaux affichés (secours si l'export ne répond pas).
+// --- Barre du bas : playlist, exports ----------------------------------------------------
 function playlistFromTracks(tracks) {
   const seen = new Set(), lines = [];
   for (const t of tracks || []) {
@@ -305,120 +723,145 @@ function playlistFromTracks(tracks) {
     const line = t.artist ? `${t.artist} - ${t.title}` : t.title;
     if (!seen.has(line.toLowerCase())) { seen.add(line.toLowerCase()); lines.push(line); }
   }
-  return lines.length ? lines.join("\n") + "\n" : "";
+  return lines.join("\n") + (lines.length ? "\n" : "");
 }
-
-async function showPlaylist(id) {
-  // Le panneau s'affiche toujours après une analyse terminée, même si une étape ci-dessous échoue.
-  $("sl-go").onclick = async () => {
-    $("sl-go").disabled = true;
-    $("sl-status").textContent = "Démarrage…";
-    await fetch(`/api/jobs/${id}/spotify-links`, { method: "POST" });
-    clearTimeout(slTimer);
-    pollSpotifyLinks(id);
-  };
-  exportLink($("pl-dl"), id, "playlist");
-  $("pl-oauth").href = `/spotify/login?job=${id}`;
-  $("playlist").hidden = false;
-  $("x-playlist").hidden = false;
-
+$("copy").addEventListener("click", async () => {
   let text = "";
   for (let i = 0; i < 3 && !text; i++) {
-    try {
-      const r = await fetch(`/api/jobs/${id}/export.playlist`);
-      if (r.ok) text = await r.text();
-    } catch (e) {}
-    if (!text) await sleep(1000);
+    try { const r = await fetch(`/api/jobs/${jobId}/export.playlist`); if (r.ok) text = await r.text(); } catch (e) {}
+    if (!text) await sleep(600);
   }
-  if (!text.trim()) text = playlistFromTracks(lastJob && lastJob.tracks);
+  if (!text.trim()) text = playlistFromTracks(job && job.tracks);
   const n = text.trim() ? text.trim().split("\n").length : 0;
-  $("pl-text").value = text;
-  $("pl-copy").disabled = !n;
-  $("pl-copy").textContent = n ? `📋 Copier la liste (${plural(n, "morceau", "morceaux")})` : "Aucun morceau à copier";
-
-  try {
-    const job = await (await fetch(`/api/jobs/${id}`)).json();
-    const doubtful = job.tracks.filter((t) => t.needs_review);
-    $("review").hidden = !doubtful.length;
-    $("review-count").textContent = plural(doubtful.length, "morceau", "morceaux");
-    $("review-list").innerHTML = doubtful.map((t) => `<li>${esc(t.start_str)} — ${esc(t.artist)} - ${esc(t.title)}`
-      + ((t.alternatives || []).length ? ` <em>(ou : ${t.alternatives.map((a) => esc(a.artist + " - " + a.title)).join(" / ")})</em>` : "")
-      + "</li>").join("");
-  } catch (e) {}
-  try { $("pl-direct").hidden = !(await (await fetch("/api/spotify/config")).json()).oauth; } catch (e) {}
-}
-
-// Fenêtre de l'app Mac : fonctions fournies par l'app (presse-papiers, « Enregistrer sous »).
-const desktop = () => (window.pywebview && window.pywebview.api) || null;
-
-async function copyFrom(textareaId, button, doneText) {
-  const ta = $(textareaId);
-  let ok = false;
-  if (desktop()) { try { ok = await desktop().copy(ta.value); } catch (e) {} }
-  if (!ok) {
-    try { await navigator.clipboard.writeText(ta.value); ok = true; }
-    catch (e) { ta.focus(); ta.select(); ok = document.execCommand("copy"); }
+  if (!n) { toast("Aucun morceau à copier"); return; }
+  toast(await copyText(text) ? `${plural(n, "morceau copié", "morceaux copiés")} — collez-les dans TuneMyMusic ou Spotlistr` : "Copie impossible");
+});
+$("exp-btn").addEventListener("click", (e) => { e.stopPropagation(); $("exp-menu").classList.toggle("open"); });
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#exp-menu") && !e.target.closest("#exp-btn")) $("exp-menu").classList.remove("open");
+  if (!e.target.closest("#opts") && !e.target.closest("#opt-btn")) $("opts").hidden = true;
+});
+$("exp-menu").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-exp]"); if (!b || !jobId) return;
+  $("exp-menu").classList.remove("open");
+  const fmtName = b.dataset.exp;
+  if (desktop()) {  // fenêtre de l'app : « Enregistrer sous » de macOS
+    try { const path = await desktop().save_export(jobId, fmtName); if (path) toast("Enregistré : " + path); }
+    catch (err) { toast("Enregistrement impossible : " + (err.message || err)); }
+    return;
   }
-  button.textContent = ok ? doneText : "⚠️ Copie impossible : sélectionnez le texte puis Cmd + C";
+  const a = document.createElement("a"); a.href = `/api/jobs/${jobId}/export.${fmtName}`; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
+});
+$("oauth").addEventListener("click", () => { window.open(`/spotify/login?job=${jobId}`, "_blank"); $("exp-menu").classList.remove("open"); });
+fetch("/api/spotify/config").then((r) => r.json()).then((c) => { $("oauth").hidden = !c.oauth; }).catch(() => {});
+
+// --- Liens Spotify (fenêtre) ---------------------------------------------------------------
+let slTimer = null;
+$("sl-open").addEventListener("click", () => { $("exp-menu").classList.remove("open"); $("sl-modal").hidden = false; pollSpotifyLinks(false); });
+$("sl-close").addEventListener("click", () => { $("sl-modal").hidden = true; clearTimeout(slTimer); });
+$("sl-modal").addEventListener("click", (e) => { if (e.target === $("sl-modal")) $("sl-close").click(); });
+$("sl-go").addEventListener("click", async () => {
+  $("sl-go").disabled = true; $("sl-status").textContent = "Démarrage…";
+  await fetch(`/api/jobs/${jobId}/spotify-links`, { method: "POST" });
+  pollSpotifyLinks(true);
+});
+$("sl-copy").addEventListener("click", async () => { if (await copyText($("sl-text").value)) toast("Liens copiés : collez-les (Cmd + V) dans une playlist de l'app Spotify"); });
+async function pollSpotifyLinks(keep) {
+  clearTimeout(slTimer);
+  let j; try { j = await (await fetch(`/api/jobs/${jobId}`)).json(); } catch (e) { slTimer = setTimeout(() => pollSpotifyLinks(keep), 3000); return; }
+  const st = j.spotify_links || {};
+  $("sl-go").disabled = st.status === "running";
+  if (st.status === "running") { $("sl-status").textContent = st.total ? `Recherche… ${st.done}/${st.total} morceaux` : "Recherche…"; slTimer = setTimeout(() => pollSpotifyLinks(keep), 1500); return; }
+  if (st.status === "error") { $("sl-status").textContent = "Erreur : " + st.error; return; }
+  if (st.status !== "done") { $("sl-status").textContent = ""; $("sl-text").hidden = $("sl-copy").hidden = true; $("sl-missing").textContent = ""; return; }
+  $("sl-status").textContent = `${st.links.length ? "✅" : "⚠️"} ${plural(st.links.length, "lien Spotify trouvé", "liens Spotify trouvés")}`;
+  $("sl-text").value = st.links.join("\n"); $("sl-text").hidden = $("sl-copy").hidden = !st.links.length;
+  $("sl-missing").textContent = st.missing.length ? `Sans lien (${st.missing.length}) : ${st.missing.join(" · ")}` : "";
+  if (keep) { job = j; render(); }
 }
 
-// Exports : dans la fenêtre de l'app, boîte « Enregistrer sous » de macOS au lieu d'un téléchargement.
-function exportLink(el, id, fmt) {
-  el.href = `/api/jobs/${id}/export.${fmt}`;
-  el.onclick = async (e) => {
-    if (!desktop()) return;  // navigateur : téléchargement normal
-    e.preventDefault();
-    try {
-      const path = await desktop().save_export(id, fmt);
-      if (path) $("status").textContent = `💾 Enregistré : ${path}`;
-    } catch (err) { $("status").innerHTML = `<span class="err">Enregistrement impossible : ${esc(err.message || err)}</span>`; }
-  };
+// --- Historique -----------------------------------------------------------------------------
+let hist = [];
+async function loadHistory() {
+  try { hist = await (await fetch("/api/history")).json(); } catch (e) { hist = []; }
+  $("hist-count").hidden = !hist.length; $("hist-count").textContent = hist.length;
+  $("hist-info").textContent = hist.length ? `${plural(hist.length, "analyse enregistrée", "analyses enregistrées")} sur ce Mac.` : "Aucune analyse enregistrée.";
+  $("hist-clear").disabled = !hist.length;
+  renderRecent(); renderHistory();
 }
-$("x-playlist").addEventListener("click", (e) => { e.preventDefault(); $("playlist").scrollIntoView({ behavior: "smooth" }); });
-$("pl-copy").addEventListener("click", (e) => copyFrom("pl-text", e.currentTarget, "✅ Copié !"));
-$("sl-copy").addEventListener("click", (e) =>
-  copyFrom("sl-text", e.currentTarget, "✅ Copié ! Collez-les (Cmd + V) dans une playlist de l'app Spotify"));
-
-// Dans la fenêtre de l'app Mac, on quitte avec Cmd + Q : le bouton ne sert qu'en mode navigateur.
-fetch("/api/app").then((r) => r.json()).then((info) => { $("quit").hidden = !info.app || info.window; }).catch(() => {});
-$("quit").addEventListener("click", async () => {
-  if (!confirm("Arrêter Mix Scanner ? Les analyses en cours seront interrompues (elles reprendront au prochain lancement).")) return;
-  try { await fetch("/api/quit", { method: "POST" }); } catch (e) {}
-  document.body.innerHTML = '<main><h1>🎧 Mix Scanner est arrêté</h1><p class="sub">Vous pouvez fermer cet onglet. Pour le relancer, ouvrez l\'application Mix Scanner.</p></main>';
+function renderRecent() {
+  $("recent").innerHTML = hist.slice(0, 3).map((h) => `<button type="button" data-h="${h.id}" class="${job && job.history_id === h.id ? "on" : ""}"><div class="thumb" style="${grad(h.title)}"></div>
+    <div><b>${esc(h.title)}</b><span>${plural(h.summary.tracks, "morceau", "morceaux")} · ${esc(when(h.created).replace(/ à .*/, "").replace(/^le /, ""))}</span></div></button>`).join("")
+    || `<div class="none">Aucune pour l'instant</div>`;
+}
+function groupOf(ts) {
+  const days = (new Date().setHours(0, 0, 0, 0) - new Date(ts * 1000).setHours(0, 0, 0, 0)) / 864e5;
+  return days < 1 ? "Aujourd'hui" : days < 7 ? "Cette semaine" : "Plus ancien";
+}
+function renderHistory() {
+  const q = ($("hq").value || "").toLowerCase();
+  const items = hist.filter((h) => !q || (h.title || "").toLowerCase().includes(q));
+  const groups = {};
+  items.forEach((h) => (groups[groupOf(h.created)] ||= []).push(h));
+  $("hlist").innerHTML = ["Aujourd'hui", "Cette semaine", "Plus ancien"].filter((g) => groups[g]).map((g) => `<div class="h-group">${g}</div>` + groups[g].map((h) => {
+    const s = h.summary || {}, d = new Date(h.created * 1000);
+    const date = g === "Aujourd'hui" ? d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+    return `<div class="h-row" data-h="${h.id}"><div class="thumb" style="${grad(h.title)}"></div>
+      <div style="min-width:0"><div class="ti">${esc(h.title)}</div><div class="meta">${esc(h.kind)}${h.duration ? " · " + fmt(h.duration) : ""} · ${plural(s.tracks || 0, "morceau", "morceaux")}${s.review ? ` · <em>${s.review} à vérifier</em>` : ""}</div></div>
+      <span class="date">${date}</span><button class="del" type="button" title="Supprimer cette analyse">🗑</button></div>`;
+  }).join("")).join("") || `<div class="empty">${hist.length ? "Aucun mix ne correspond." : "<b>Aucune analyse pour l'instant</b>Chaque analyse terminée est enregistrée ici automatiquement."}</div>`;
+}
+async function openHistory(id) {
+  try { const r = await fetch(`/api/history/${id}/open`, { method: "POST" }); if (!r.ok) throw new Error(); openJob((await r.json()).id); }
+  catch (e) { toast("Cette analyse est introuvable"); loadHistory(); }
+}
+$("hq").addEventListener("input", renderHistory);
+$("hlist").addEventListener("click", async (e) => {
+  const row = e.target.closest(".h-row"); if (!row) return;
+  if (e.target.closest(".del")) {
+    if (!confirm("Supprimer cette analyse de l'historique ?")) return;
+    await fetch(`/api/history/${row.dataset.h}`, { method: "DELETE" }); loadHistory(); return;
+  }
+  openHistory(row.dataset.h);
+});
+$("recent").addEventListener("click", (e) => { const b = e.target.closest("[data-h]"); if (b) openHistory(b.dataset.h); });
+$("hist-clear").addEventListener("click", async () => {
+  if (!confirm("Supprimer toutes les analyses de l'historique ? Cette action est définitive.")) return;
+  for (const h of hist) await fetch(`/api/history/${h.id}`, { method: "DELETE" });
+  loadHistory(); toast("Historique supprimé");
 });
 
-// --- Mise à jour de l'app Mac ---------------------------------------------------------
+// --- Version, mise à jour, quitter ----------------------------------------------------------
 const UPDATE_BUSY = ["checking", "downloading", "installing", "restarting"];
 async function checkUpdate() {
-  let u;
-  try { u = await (await fetch("/api/update")).json(); } catch (e) { return; }
+  let u; try { u = await (await fetch("/api/update")).json(); } catch (e) { return; }
   const c = u.current || {};
-  if (c.version) $("version").textContent = `Mix Scanner ${c.version}` + (c.sha ? ` · version du ${(c.time || "").slice(0, 10)} (${c.sha.slice(0, 7)})` : "");
-  const box = $("update"), text = $("update-text"), go = $("update-go");
+  $("version").textContent = `Version ${c.version || ""}`;
+  $("about").textContent = `Mix Scanner ${c.version || ""}` + (c.sha ? ` · version du ${(c.time || "").slice(0, 10)} (${c.sha.slice(0, 7)})` : "");
+  const state = $("ver-state");
+  state.hidden = !["none", "available"].includes(u.status);
+  state.className = u.status === "available" ? "new" : ""; state.textContent = u.status === "available" ? "● mise à jour" : "● à jour";
+  const box = $("update"), go = $("update-go");
   box.classList.toggle("error", u.status === "error");
-  $("update-page").href = u.page || "#";
-  $("update-page").hidden = u.status !== "error";
-  go.hidden = !["available", "error"].includes(u.status);
-  go.disabled = false;
+  $("update-page").href = u.page || "#"; $("update-page").hidden = u.status !== "error";
+  go.hidden = !["available", "error"].includes(u.status); go.disabled = false;
   go.textContent = u.status === "error" ? "Réessayer" : "Mettre à jour";
   const date = u.published ? new Date(u.published).toLocaleDateString("fr-FR", { day: "numeric", month: "long" }) : "";
-  const size = u.size ? ` · ${Math.round(u.size / 1048576)} Mo` : "";
   const msgs = {
-    available: `🎉 Une nouvelle version de Mix Scanner est disponible${date ? " (" + date + ")" : ""}${size}.`,
+    available: `🎉 Une nouvelle version de Mix Scanner est disponible${date ? " (" + date + ")" : ""}${u.size ? " · " + Math.round(u.size / 1048576) + " Mo" : ""}.`,
     downloading: `⬇️ Téléchargement de la mise à jour… ${Math.round((u.progress || 0) * 100)} %`,
     installing: "🔧 Installation et vérification de la nouvelle version…",
     restarting: "✅ Mise à jour installée : Mix Scanner redémarre…",
     error: `⚠️ La mise à jour a échoué : ${u.error || "erreur inconnue"}`,
   };
   if (u.from_dmg && !["downloading", "installing", "restarting"].includes(u.status)) {
-    msgs[u.status] = "📦 Mix Scanner est ouvert depuis le fichier DMG : glissez-le dans le dossier Applications, "
-      + "éjectez le DMG puis ouvrez-le depuis Applications (sinon les mises à jour ne pourront pas s'installer).";
+    msgs[u.status] = "📦 Mix Scanner est ouvert depuis le fichier DMG : glissez-le dans le dossier Applications, éjectez le DMG puis ouvrez-le depuis Applications (sinon les mises à jour ne pourront pas s'installer).";
     go.hidden = true;
   }
-  box.hidden = !msgs[u.status];
-  text.textContent = msgs[u.status] || "";
+  box.hidden = !msgs[u.status]; $("update-text").textContent = msgs[u.status] || "";
   if (UPDATE_BUSY.includes(u.status)) setTimeout(checkUpdate, u.status === "checking" ? 2000 : 1000);
 }
+$("ver-state").addEventListener("click", () => { if ($("ver-state").classList.contains("new")) $("update").scrollIntoView(); });
 $("update-go").addEventListener("click", async () => {
   $("update-go").disabled = true;
   let r = await fetch("/api/update/install", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
@@ -429,68 +872,15 @@ $("update-go").addEventListener("click", async () => {
   }
   checkUpdate();
 });
-checkUpdate();
+// Dans la fenêtre de l'app Mac, on quitte avec Cmd + Q : le bouton ne sert qu'en mode navigateur.
+fetch("/api/app").then((r) => r.json()).then((info) => { $("quit").hidden = !info.app || info.window; }).catch(() => {});
+$("quit").addEventListener("click", async () => {
+  if (!confirm("Arrêter Mix Scanner ? Les analyses en cours seront interrompues (elles reprendront au prochain lancement).")) return;
+  try { await fetch("/api/quit", { method: "POST" }); } catch (e) {}
+  document.body.innerHTML = '<main style="padding:40px"><h1>🎧 Mix Scanner est arrêté</h1><p class="sub">Vous pouvez fermer cet onglet.</p></main>';
+});
 
-function fail(msg) { $("status").innerHTML = `<span class="err">Erreur : ${esc(msg)}</span>`; $("go").disabled = false; }
-
-async function poll(id) {
-  let job;
-  try { job = await (await fetch(`/api/jobs/${id}`)).json(); } catch (e) { timer = setTimeout(() => poll(id), 2000); return; }
-  lastJob = job;
-  render(job);
-  if (job.status === "error") return fail(job.error);
-  if (job.status === "done") {
-    $("go").disabled = false;
-    $("status").textContent = `Terminé : ${plural(job.tracks.length, "morceau identifié", "morceaux identifiés")}.`;
-    $("prog").style.width = "100%";
-    for (const f of ["txt", "csv", "md", "json"]) exportLink($(`x-${f}`), id, f);
-    $("exports").hidden = false;
-    showPlaylist(id);
-    return;
-  }
-  timer = setTimeout(() => poll(id), 1500);
-}
-
-function render(job) {
-  const pct = Math.round((job.progress || 0) * 100);
-  $("prog").style.width = pct + "%";
-  if (job.status === "running" || job.status === "queued")
-    $("status").textContent = `${STAGES[job.stage] || job.stage}… ${pct} % · ${plural(job.tracks.length, "morceau trouvé", "morceaux trouvés")}`;
-  const w = job.warnings || [];
-  const nw = job.warning_count || w.length;
-  $("warn").textContent = w.length ? `⚠️ ${nw} extrait(s) non analysé(s) (retentés automatiquement à la fin) — dernier : ${w[w.length - 1]}` : "";
-  if (job.source) { $("head").hidden = false; $("mixtitle").textContent = job.source.title; }
-  const ytid = job.source && job.source.url && job.source.url.includes("youtu") ? job.source.video_id : null;
-  $("list").innerHTML = job.tracks.map((t) => trackHTML(t, ytid)).join("");
-  $("legend").hidden = !job.tracks.some((t) => t.availability.length);
-}
-
-function trackHTML(t, ytid) {
-  const time = ytid
-    ? `<a href="https://www.youtube.com/watch?v=${esc(ytid)}&t=${Math.floor(t.start)}s" target="_blank" rel="noopener">${t.start_str}</a>`
-    : t.start_str;
-  const kind = KINDS[t.version.kind] || t.version.kind;
-  const tags = [`<span class="tag kind">${esc(kind)}${t.version.label && t.version.kind !== "original" ? " · " + esc(t.version.label) : ""}</span>`];
-  if (t.source === "description") tags.push(`<span class="tag">d'après la description</span>`);
-  if (t.source === "audio+description") tags.push(`<span class="tag">confirmé par la description</span>`);
-  if (t.source !== "description") tags.push(`<span class="tag">confiance ${t.confidence === "high" ? "élevée" : t.confidence === "medium" ? "moyenne" : "faible"}</span>`);
-  if (t.needs_review) tags.push(`<span class="tag review">⚠️ à vérifier</span>`);
-  if (t.label) tags.push(`<span class="tag">${esc(t.label)}</span>`);
-  if (t.year) tags.push(`<span class="tag">${esc(t.year)}</span>`);
-  const plats = t.availability.map((p) => {
-    const url = p.url || p.search_url;
-    let cls = p.status, txt = PLATS[p.platform] || p.platform;
-    if (p.status === "available" && p.same_version === false) { cls = "other"; txt += " (autre version)"; }
-    if (p.status === "unverified" || p.status === "error") txt = "🔎 " + txt;
-    const title = p.matched_title || p.note || "";
-    return `<a class="plat ${cls}" href="${esc(url)}" target="_blank" rel="noopener" title="${esc(title)}">${esc(txt)}</a>`;
-  }).join("");
-  const cover = t.cover ? `<img class="cover" src="${esc(t.cover)}" alt="" loading="lazy">` : `<div class="cover"></div>`;
-  return `<li class="track"><div class="time">${time}</div>${cover}<div>
-    <div class="title">${esc(t.title)}</div><div class="artist">${esc(t.artist)}</div>
-    <div class="tags">${tags.join("")}</div>${t.alternatives.length
-      ? `<div class="alt">Autre détection : ${t.alternatives.map((a) => esc(a.artist + " - " + a.title)).join(" / ")}</div>` : ""}${plats ? `<div class="plats">${plats}</div>` : ""}</div></li>`;
-}
+render(); loadHistory(); checkUpdate();
 </script>
 </body>
 </html>

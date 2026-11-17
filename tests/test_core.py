@@ -946,3 +946,108 @@ def test_other_programs_on_the_port_are_left_alone():
         s.listen()
         port = s.getsockname()[1]
         assert desktop.stop_old_server(port, wait=0.5) is False
+
+
+# --- historique, arrêt, autre détection (nouvelle interface) ---------------------------------
+
+def _full_result():
+    from mixscanner.models import PlatformResult
+    from mixscanner.pipeline import ScanResult
+    t1 = _t("The Box", "Roddy Ricch", hits=1,
+            availability=[PlatformResult("deezer", "available", url="d", matched_title="Roddy Ricch - The Box", same_version=True)],
+            alternatives=[Match(title="A Box", artist="Drxse", provider="shazam")])
+    t1.index, t1.start, t1.end = 1, 60, 120
+    t2 = _t("Glue", "Bicep", hits=4)
+    t2.index, t2.start, t2.end = 2, 120, 300
+    return ScanResult(source={"title": "Mon mix", "url": "https://www.youtube.com/watch?v=x", "duration": 300},
+                      tracks=[t1, t2], windows=10, recognized_windows=9, description_entries=0)
+
+
+def test_history_roundtrip(tmp_path, monkeypatch):
+    from mixscanner import history
+    monkeypatch.setenv("MIXSCANNER_CACHE", str(tmp_path))
+    res = _full_result()
+    hid = history.save(res, "https://www.youtube.com/watch?v=x", options={"step": 20})
+    [entry] = history.entries()
+    assert entry["id"] == hid and entry["title"] == "Mon mix" and entry["kind"] == "YouTube" and "result" not in entry
+    assert entry["summary"]["tracks"] == 2 and entry["summary"]["coverage"] == 90 and entry["summary"]["streaming"] == 1
+    back, data = history.load(hid)
+    assert back.to_dict() == res.to_dict() and data["options"] == {"step": 20}
+    assert back.tracks[0].alternatives[0].artist == "Drxse" and back.tracks[0].ambiguous
+    assert history.delete(hid) and history.entries() == [] and not history.delete(hid)
+    with pytest.raises(KeyError):
+        history.load("../../etc/passwd")
+
+
+def test_history_api_open_and_alternative(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from mixscanner import history, web
+    monkeypatch.setenv("MIXSCANNER_CACHE", str(tmp_path))
+    hid = history.save(_full_result(), "https://www.youtube.com/watch?v=x")
+    client = TestClient(web.app)
+    assert [e["id"] for e in client.get("/api/history").json()] == [hid]
+    jid = client.post(f"/api/history/{hid}/open").json()["id"]
+    assert client.post(f"/api/history/{hid}/open").json()["id"] == jid  # déjà ouverte : même analyse
+    job = client.get(f"/api/jobs/{jid}").json()
+    assert job["status"] == "done" and job["history_id"] == hid and job["stats"]["tracks"] == 2
+    assert client.get(f"/api/jobs/{jid}/export.playlist").text.startswith("Roddy Ricch - The Box")
+    # « Garder plutôt celui-ci » (sans revérification réseau : pas de disponibilité dans ce morceau)
+    web.JOBS[jid].result.tracks[0].availability = []
+    t = client.post(f"/api/jobs/{jid}/tracks/1/alternative/0").json()
+    assert (t["artist"], t["title"]) == ("Drxse", "A Box") and t["alternatives"][0]["artist"] == "Roddy Ricch"
+    assert history.load(hid)[0].tracks[0].artist == "Drxse"  # l'historique est mis à jour
+    assert history.entries()[0]["created"] == web.JOBS[jid].created  # sans changer la date de l'analyse
+    assert client.post("/api/history/000000000000/open").status_code == 404
+    assert client.delete(f"/api/history/{hid}").json() == {"deleted": True}
+
+
+def test_cancel_keeps_recognized_windows_for_resume(mix_file, tmp_path):
+    import threading
+    import time as _t
+    from mixscanner.pipeline import scan as _scan
+
+    class Slow(FrequencyRecognizer):
+        async def recognize(self, wav):
+            await asyncio.sleep(0.3)
+            return await super().recognize(wav)
+
+    opts = ScanOptions(step=20, clip=10, check_platforms=False, cache_dir=tmp_path, concurrency=1)
+    holder = {}
+
+    async def main():
+        holder["task"] = asyncio.current_task()
+        return await _scan(str(mix_file), opts, recognizer=Slow())
+
+    loop = asyncio.new_event_loop()
+    threading.Timer(1.5, lambda: loop.call_soon_threadsafe(holder["task"].cancel)).start()
+    with pytest.raises(asyncio.CancelledError):
+        loop.run_until_complete(main())
+    loop.close()
+    cache = list(tmp_path.glob("hits-v3-*.json"))
+    assert cache and 0 < len(json.loads(cache[0].read_text())) < 13  # reprise possible
+    counting = CountingRecognizer()
+    asyncio.run(_scan(str(mix_file), opts, recognizer=counting))
+    assert counting.calls < 13
+
+
+def test_eta_ignores_instant_cached_windows():
+    import time as _time
+    from mixscanner import web
+    job = web.Job(web.ScanRequest(url="x"))
+    for d in range(1, 41):  # 40 extraits en cache : instantanés
+        job.on_event("recognize", {"done": d, "total": 122, "hit": Hit(d * 30, None)})
+    assert job.eta() is None  # pas encore de rythme fiable
+    now = _time.time()
+    job._pace = [(now + 3 * k, 40 + k) for k in range(25)]  # puis 1 extrait toutes les 3 s
+    job.windows_done = 64
+    assert 160 < job.eta() < 240  # ≈ 58 extraits × 3 s, + vérification des plateformes
+
+
+def test_reanalysing_the_same_mix_replaces_its_history_entry(tmp_path, monkeypatch):
+    from mixscanner import history
+    monkeypatch.setenv("MIXSCANNER_CACHE", str(tmp_path))
+    first = history.save(_full_result(), "u", options={"step": 30})
+    assert history.find_same("u", {"step": 30}) == first
+    assert history.find_same("u", {"step": 20}) is None and history.find_same("autre", {"step": 30}) is None
+    again = history.save(_full_result(), "u", history.find_same("u", {"step": 30}), {"step": 30})
+    assert again == first and len(history.entries()) == 1

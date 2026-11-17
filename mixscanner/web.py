@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 
-from . import spotify_links, spotify_playlist
+from . import history, spotify_links, spotify_playlist
 from .audio import BROWSERS
 from .export import EXPORTERS
 from .pipeline import ScanOptions, ScanResult, scan
@@ -130,6 +130,39 @@ class Job:
         self.result: ScanResult | None = None
         self.spotify_links: dict[str, Any] = {"status": "idle"}
         self.lock = threading.Lock()
+        self.created = time.time()
+        self.recognize_started: float | None = None
+        self._pace: list[tuple[float, int]] = []  # (heure, extraits faits) des derniers extraits
+        self.windows_total = 0
+        self.windows_done = 0
+        self.history_id: str | None = None
+        self.reopened = False
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._task: asyncio.Task | None = None
+
+    @classmethod
+    def from_history(cls, entry_id: str) -> "Job":
+        """Rouvre une analyse de l'historique (sans refaire le scan)."""
+        res, data = history.load(entry_id)
+        opts = data.get("options") or {}
+        req = ScanRequest(url=data.get("url") or res.source.get("url") or "x",
+                          step=opts.get("step", 30), recognizer=opts.get("recognizer", "shazam"))
+        job = cls(req)
+        job.result, job.tracks, job.source = res, res.tracks, res.source
+        job.status = job.stage = "done"
+        job.progress = 1.0
+        job.windows_total = job.windows_done = res.windows
+        job.history_id = entry_id
+        job.reopened = True
+        job.created = data.get("created") or job.created
+        return job
+
+    def cancel(self) -> bool:
+        """Arrête l'analyse en cours ; les extraits déjà reconnus restent en cache."""
+        if self.status not in ("queued", "running") or not self._loop or not self._task:
+            return False
+        self._loop.call_soon_threadsafe(self._task.cancel)
+        return True
 
     def on_event(self, stage: str, data: dict[str, Any]) -> None:
         with self.lock:
@@ -146,6 +179,10 @@ class Job:
             elif stage == "source":
                 self.source = data
             elif stage == "recognize":
+                if self.recognize_started is None:
+                    self.recognize_started = time.time()
+                self.windows_total, self.windows_done = data["total"], data["done"]
+                self._pace = (self._pace + [(time.time(), data["done"])])[-25:]
                 self.hits = [h for h in self.hits if h.offset != data["hit"].offset] + [data["hit"]]
                 self.progress = data["done"] / data["total"]
                 # tracklist provisoire, affichée en direct
@@ -161,13 +198,27 @@ class Job:
         opts = ScanOptions(step=self.req.step, clip=self.req.clip, recognizer=self.req.recognizer,
                            check_platforms=self.req.check_platforms,
                            cookies_from_browser=self.req.cookies_from_browser or None)
+        async def main() -> ScanResult:
+            self._loop, self._task = asyncio.get_running_loop(), asyncio.current_task()
+            return await scan(self.req.url, opts, self.on_event)
+
         try:
-            self.result = asyncio.run(scan(self.req.url, opts, self.on_event))
+            self.result = asyncio.run(main())
             self.tracks = self.result.tracks
             self.status = "done"
+        except asyncio.CancelledError:
+            self.status = "cancelled"
+            return
         except Exception as e:
             self.error = str(e) or type(e).__name__
             self.status = "error"
+            return
+        try:
+            options = {"step": self.req.step, "recognizer": self.req.recognizer}
+            # Même mix, mêmes réglages : la nouvelle analyse remplace l'ancienne dans l'historique.
+            self.history_id = history.save(self.result, self.req.url, history.find_same(self.req.url, options), options)
+        except Exception:
+            pass  # l'historique est un plus : son échec ne doit pas gâcher l'analyse
 
     def start_spotify_links(self) -> bool:
         """Lance la recherche des liens Spotify, sauf si elle tourne déjà (double clic)."""
@@ -194,13 +245,40 @@ class Job:
         except Exception as e:
             self.spotify_links = {"status": "error", "error": f"{type(e).__name__}: {e}"}
 
+    def eta(self) -> float | None:
+        """Secondes restantes estimées pendant la reconnaissance."""
+        if self.stage != "recognize" or len(self._pace) < 6 or not self.windows_total:
+            return None
+        # Rythme des derniers extraits seulement : ceux déjà en cache défilent instantanément au début
+        # et donneraient une estimation bien trop optimiste.
+        (t0, d0), (t1, d1) = self._pace[0], self._pace[-1]
+        if d1 <= d0 or t1 - t0 < 4:
+            return None
+        per_window = (t1 - t0) / (d1 - d0)
+        remaining = self.windows_total - self.windows_done
+        return remaining * per_window + min(60, 2 * len(self.tracks))  # + vérification des plateformes
+
+    def stats(self) -> dict[str, Any]:
+        if self.result:
+            return history.summary(self.result)
+        recognized = sum(1 for h in self.hits if h.match)
+        return {"tracks": len(self.tracks), "review": sum(1 for t in self.tracks if t.needs_review),
+                "streaming": sum(1 for t in self.tracks if any(p.status == "available" for p in t.availability)),
+                "checked": any(t.availability for t in self.tracks), "playlist": None,
+                "windows": self.windows_total, "recognized_windows": recognized,
+                "coverage": round(100 * recognized / len(self.hits)) if self.hits else None}
+
     def to_dict(self) -> dict[str, Any]:
         with self.lock:
             return {
                 "spotify_links": self.spotify_links,
                 "id": self.id, "status": self.status, "stage": self.stage, "progress": self.progress,
                 "source": self.source, "error": self.error, "warnings": self.warnings, "warning_count": self.warning_count,
-                "windows_done": len(self.hits), "tracks": [t.to_dict() for t in self.tracks],
+                "windows_done": self.windows_done or len(self.hits), "windows_total": self.windows_total,
+                "eta": self.eta(), "stats": self.stats(), "history_id": self.history_id, "url": self.req.url,
+                "kind": history.source_kind((self.source or {}).get("url") or self.req.url),
+                "options": {"step": self.req.step, "recognizer": self.req.recognizer},
+                "created": self.created, "reopened": self.reopened, "tracks": [t.to_dict() for t in self.tracks],
             }
 
 
@@ -220,6 +298,71 @@ def start_scan(req: ScanRequest) -> dict[str, str]:
     JOBS[job.id] = job
     threading.Thread(target=job.run, daemon=True).start()
     return {"id": job.id}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict[str, Any]:
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Analyse introuvable")
+    return {"cancelled": job.cancel()}
+
+
+@app.post("/api/jobs/{job_id}/tracks/{index}/alternative/{k}")
+def use_alternative(job_id: str, index: int, k: int) -> dict[str, Any]:
+    """« Garder plutôt celui-ci » : retient une autre détection pour ce morceau, puis revérifie
+    sa disponibilité sur les plateformes et met à jour l'historique."""
+    from .platforms import PlatformChecker
+    from .tracklist import use_match
+
+    job = JOBS.get(job_id)
+    if not job or not job.result:
+        raise HTTPException(404, "Analyse non terminée")
+    track = next((t for t in job.result.tracks if t.index == index), None)
+    if not track or not 0 <= k < len(track.alternatives):
+        raise HTTPException(404, "Morceau introuvable")
+    use_match(track, track.alternatives[k])
+    track.source = "audio"
+
+    async def recheck() -> list:
+        checker = PlatformChecker()
+        try:
+            return await checker.check(track)
+        finally:
+            await checker.aclose()
+    if track.availability:
+        try:
+            track.availability = asyncio.run(recheck())
+        except Exception:
+            track.availability = []
+    if job.history_id:
+        history.save(job.result, job.req.url, job.history_id, job.to_dict()["options"], created=job.created)
+    return track.to_dict()
+
+
+# --- Historique ------------------------------------------------------------------------------
+
+@app.get("/api/history")
+def history_list() -> list[dict[str, Any]]:
+    return history.entries()
+
+
+@app.post("/api/history/{entry_id}/open")
+def history_open(entry_id: str) -> dict[str, str]:
+    for job in JOBS.values():  # déjà ouverte : on la réutilise
+        if job.history_id == entry_id and job.status == "done":
+            return {"id": job.id}
+    try:
+        job = Job.from_history(entry_id)
+    except (KeyError, FileNotFoundError, ValueError):
+        raise HTTPException(404, "Analyse introuvable dans l'historique") from None
+    JOBS[job.id] = job
+    return {"id": job.id}
+
+
+@app.delete("/api/history/{entry_id}")
+def history_delete(entry_id: str) -> dict[str, bool]:
+    return {"deleted": history.delete(entry_id)}
 
 
 @app.post("/api/upload")
