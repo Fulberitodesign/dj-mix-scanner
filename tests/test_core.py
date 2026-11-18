@@ -1051,3 +1051,15 @@ def test_reanalysing_the_same_mix_replaces_its_history_entry(tmp_path, monkeypat
     assert history.find_same("u", {"step": 20}) is None and history.find_same("autre", {"step": 30}) is None
     again = history.save(_full_result(), "u", history.find_same("u", {"step": 30}), {"step": 30})
     assert again == first and len(history.entries()) == 1
+
+
+def test_pages_are_never_cached_and_url_changes_with_version():
+    """Après une mise à jour, la fenêtre de l'app ne doit jamais réafficher l'ancienne page."""
+    from fastapi.testclient import TestClient
+    from mixscanner import __version__, web
+    from mixscanner.app import page_url
+
+    client = TestClient(web.app)
+    for path in ("/", "/api/history", "/api/app"):
+        assert "no-store" in client.get(path).headers["cache-control"]
+    assert page_url(8000).startswith("http://127.0.0.1:8000/?v=" + __version__)

@@ -47,7 +47,11 @@ def busy() -> bool:
 async def _track_activity(request: Request, call_next):
     global _last_activity
     _last_activity = time.monotonic()
-    return await call_next(request)
+    response = await call_next(request)
+    # Jamais de cache : sinon la fenêtre de l'app (WebKit) peut réafficher la page d'une ancienne
+    # version pendant des heures après une mise à jour.
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
 
 
 @app.get("/api/app")

@@ -123,6 +123,18 @@ def _choose_port() -> int:
     return port
 
 
+def page_url(port: int) -> str:
+    """Adresse de l'interface, propre à cette version : une page gardée en cache par une version
+    précédente ne peut pas être réaffichée après une mise à jour."""
+    from urllib.parse import quote
+
+    from . import __version__
+    from .updater import build_info
+
+    sha = (build_info().get("sha") or "")[:7]
+    return f"http://{HOST}:{port}/?v={quote(__version__ + ('-' + sha if sha else ''))}"
+
+
 def _make_server(port: int):
     import uvicorn
 
@@ -230,9 +242,9 @@ def run_window(selftest: bool = False) -> int:
     # Toujours notre propre serveur : en réutiliser un déjà lancé afficherait une autre version.
     port = _choose_port()
     server, thread = _start_server_thread(port)
-    url = f"http://{HOST}:{port}"
-    api = DesktopApi(url)
-    window = _create_window(url, api)
+    base = f"http://{HOST}:{port}"
+    api = DesktopApi(base)
+    window = _create_window(page_url(port), api)
     result = {"ok": not selftest}
 
     if selftest:
@@ -240,7 +252,7 @@ def run_window(selftest: bool = False) -> int:
         threading.Thread(target=lambda: (time.sleep(150), print("AUTOTEST FENÊTRE : délai dépassé"),
                                          os._exit(3)), daemon=True).start()
 
-    logging.info("Mix Scanner (fenêtre) sur %s", url)
+    logging.info("Mix Scanner (fenêtre) sur %s", base)
     webview.start(localization=FR, private_mode=False)
     if server:
         server.should_exit = True
@@ -309,7 +321,7 @@ def run_browser() -> int:
     def open_when_ready() -> None:
         for _ in range(300):
             if server.started:
-                webbrowser.open(f"http://{HOST}:{port}")
+                webbrowser.open(page_url(port))
                 return
             time.sleep(0.1)
     threading.Thread(target=open_when_ready, daemon=True).start()
